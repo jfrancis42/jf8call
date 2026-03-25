@@ -192,10 +192,10 @@ endif()
 if(DEFINED CODEC2_DIR)
     find_library(CODEC2_LIB NAMES codec2
         PATHS "${CODEC2_DIR}/lib" "${CODEC2_DIR}"
-        NO_DEFAULT_PATH)
+        NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
     find_path(CODEC2_INCLUDE_DIR NAMES codec2/freedv_api.h
         PATHS "${CODEC2_DIR}/include"
-        NO_DEFAULT_PATH)
+        NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
     if(CODEC2_LIB AND CODEC2_INCLUDE_DIR)
         set(CODEC2_FOUND TRUE)
         set(CODEC2_LIBRARIES "${CODEC2_LIB}")

@@ -17,6 +17,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CROSS_DIR="$HOME/Qt-cross"
 HAMLIB_WIN_DIR="$CROSS_DIR/hamlib-windows"
 PORTAUDIO_WIN_DIR="$CROSS_DIR/portaudio-windows"
+CODEC2_SRC_DIR="$CROSS_DIR/codec2-src"
+CODEC2_WIN_BUILD="$CROSS_DIR/codec2-win-build"
+CODEC2_WIN_DIR="$CROSS_DIR/codec2-windows"
 GFSK8MODEM_DIR="${GFSK8MODEM_DIR:-$HOME/gfsk8-modem-clean}"
 OLIVIA_MODEM_DIR="${OLIVIA_MODEM_DIR:-$HOME/olivia-modem}"
 PSK_MODEM_DIR="${PSK_MODEM_DIR:-$HOME/psk31}"
@@ -76,6 +79,37 @@ if [[ "${1:-}" == "--setup" ]]; then
         echo "=== PortAudio already built, skipping ==="
     fi
 
+    if [[ ! -f "$CODEC2_WIN_DIR/lib/libcodec2.a" ]]; then
+        echo "=== Building Codec2 for Windows ==="
+        if [[ ! -d "$CODEC2_SRC_DIR" ]]; then
+            curl -fsSL "https://github.com/drowe67/codec2/archive/refs/tags/1.2.0.tar.gz" \
+                -o /tmp/codec2.tar.gz
+            tar xf /tmp/codec2.tar.gz -C "$CROSS_DIR"
+            mv "$CROSS_DIR/codec2-1.2.0" "$CODEC2_SRC_DIR"
+            rm /tmp/codec2.tar.gz
+        fi
+        cmake -B "$CODEC2_WIN_BUILD" -S "$CODEC2_SRC_DIR" \
+            -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$SCRIPT_DIR/cmake/toolchain-windows-mingw64.cmake" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DUNITTEST=OFF \
+            -DINSTALL_EXAMPLES=OFF
+        cmake --build "$CODEC2_WIN_BUILD" --target codec2
+        mkdir -p "$CODEC2_WIN_DIR/lib" "$CODEC2_WIN_DIR/include/codec2"
+        cp "$CODEC2_WIN_BUILD/src/libcodec2.a" "$CODEC2_WIN_DIR/lib/"
+        cp "$CODEC2_SRC_DIR/src/codec2.h" \
+           "$CODEC2_SRC_DIR/src/freedv_api.h" \
+           "$CODEC2_SRC_DIR/src/modem_stats.h" \
+           "$CODEC2_SRC_DIR/src/codec2_fdmdv.h" \
+           "$CODEC2_SRC_DIR/src/codec2_cohpsk.h" \
+           "$CODEC2_SRC_DIR/src/reliable_text.h" \
+           "$CODEC2_SRC_DIR/src/comp.h" \
+           "$CODEC2_WIN_DIR/include/codec2/"
+    else
+        echo "=== Codec2 already built, skipping ==="
+    fi
+
     echo "=== Setup complete. ==="
     exit 0
 fi
@@ -116,6 +150,35 @@ cmake -B "$OLIVIA_WIN_BUILD" -S "$OLIVIA_MODEM_DIR" \
     -DCMAKE_BUILD_TYPE=Release
 cmake --build "$OLIVIA_WIN_BUILD"
 
+# Build Codec2 for Windows if not already done
+if [[ ! -f "$CODEC2_WIN_DIR/lib/libcodec2.a" ]]; then
+    echo "=== Building Codec2 for Windows ==="
+    if [[ ! -d "$CODEC2_SRC_DIR" ]]; then
+        curl -fsSL "https://github.com/drowe67/codec2/archive/refs/tags/1.2.0.tar.gz" \
+            -o /tmp/codec2.tar.gz
+        tar xf /tmp/codec2.tar.gz -C "$CROSS_DIR"
+        mv "$CROSS_DIR/codec2-1.2.0" "$CODEC2_SRC_DIR"
+        rm /tmp/codec2.tar.gz
+    fi
+    cmake -B "$CODEC2_WIN_BUILD" -S "$CODEC2_SRC_DIR" \
+        -G Ninja \
+        -DCMAKE_TOOLCHAIN_FILE="$SCRIPT_DIR/cmake/toolchain-windows-mingw64.cmake" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DBUILD_SHARED_LIBS=OFF \
+        -DUNITTEST=OFF \
+        -DINSTALL_EXAMPLES=OFF
+    cmake --build "$CODEC2_WIN_BUILD" --target codec2
+    mkdir -p "$CODEC2_WIN_DIR/lib" "$CODEC2_WIN_DIR/include/codec2"
+    cp "$CODEC2_WIN_BUILD/src/libcodec2.a" "$CODEC2_WIN_DIR/lib/"
+    cp "$CODEC2_SRC_DIR/src/codec2.h" \
+       "$CODEC2_SRC_DIR/src/freedv_api.h" \
+       "$CODEC2_SRC_DIR/src/modem_stats.h" \
+       "$CODEC2_SRC_DIR/src/codec2_fdmdv.h" \
+       "$CODEC2_SRC_DIR/src/codec2_cohpsk.h" \
+       "$CODEC2_SRC_DIR/src/reliable_text.h" \
+       "$CODEC2_WIN_DIR/include/codec2/"
+fi
+
 # Build libpsk for Windows (library only — apps use POSIX headers unavailable on Windows)
 PSK_WIN_BUILD="$PSK_MODEM_DIR/build-windows"
 echo "=== Building libpsk for Windows ==="
@@ -139,6 +202,7 @@ cmake -B "$BUILD_DIR" -S "$SCRIPT_DIR" \
     -DQT_WINDOWS_DIR="$QT_WIN_DIR" \
     -DQT_HOST_PATH=/usr \
     -DQT_HOST_PATH_CMAKE_DIR=/usr/lib/x86_64-linux-gnu/cmake \
+    -DCODEC2_DIR="$CODEC2_WIN_DIR" \
     $HAMLIB_ARG \
     $PORTAUDIO_ARG
 
