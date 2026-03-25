@@ -1,0 +1,67 @@
+#!/bin/sh
+# configure — wrapper that runs cmake to configure the build.
+# Usage: ./configure [--prefix=PREFIX] [--gfsk8modem-dir=DIR] [--debug]
+#
+# This script exists for convenience. The actual build system is CMake.
+# Run 'make' after configure to build.
+
+set -e
+
+PREFIX=/usr/local
+BUILD_TYPE=Release
+GFSK8MODEM_DIR="${GFSK8MODEM_DIR:-$HOME/gfsk8-modem-clean}"
+EXTRA_CMAKE_ARGS=""
+
+for arg in "$@"; do
+    case "$arg" in
+        --prefix=*)
+            PREFIX="${arg#--prefix=}"
+            ;;
+        --gfsk8modem-dir=*)
+            GFSK8MODEM_DIR="${arg#--gfsk8modem-dir=}"
+            ;;
+        --debug)
+            BUILD_TYPE=Debug
+            ;;
+        --help|-h)
+            cat <<EOF
+Usage: ./configure [OPTION]...
+
+Options:
+  --prefix=PREFIX           install prefix (default: /usr/local)
+  --gfsk8modem-dir=DIR      path to gfsk8-modem-clean source tree (default: ~/gfsk8-modem-clean)
+  --debug                   build with debug symbols (default: Release)
+  --help                    show this help
+
+Environment variables:
+  GFSK8MODEM_DIR            same as --gfsk8modem-dir
+
+After configure, run: make
+EOF
+            exit 0
+            ;;
+        *)
+            echo "WARNING: unknown option: $arg"
+            ;;
+    esac
+done
+
+BUILD_DIR="build"
+mkdir -p "$BUILD_DIR"
+
+echo "Configuring JF8Call..."
+echo "  Prefix:           $PREFIX"
+echo "  Build type:       $BUILD_TYPE"
+echo "  gfsk8-modem-clean: $GFSK8MODEM_DIR"
+echo "  Build dir:        $BUILD_DIR"
+echo ""
+
+cmake -B "$BUILD_DIR" \
+    -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
+    -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+    -DGFSK8MODEM_DIR="$GFSK8MODEM_DIR" \
+    $EXTRA_CMAKE_ARGS \
+    .
+
+echo ""
+echo "Configuration complete. Run 'make' to build."

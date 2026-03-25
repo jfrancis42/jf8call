@@ -1,0 +1,285 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+#include "audioinput.h"
+#include <QDebug>
+#include <QDateTime>
+#include <cmath>
+#include <cstring>
+#include <algorithm>
+
+// KissFFT for spectrum
+#include <kissfft/kiss_fft.h>
+
+static constexpr float k_pi  = 3.14159265358979323846f;
+static constexpr int   k_inputRate  = 48000;  // PortAudio capture rate
+static constexpr int   k_outputRate = 12000;  // after 4:1 decimation
+
+// ── FIR filter construction ──────────────────────────────────────────────────
+// 49-tap Kaiser-windowed lowpass, fc = 5400/48000 = 0.1125, beta = 6.0
+// Same coefficients as js8rx/main.cpp
+
+void AudioInput::buildFirFilter()
+{
+    const int     N    = k_firTaps;
+    const float   fc   = 5400.0f / k_inputRate;
+    const float   beta = 6.0f;
+    const int     M    = N - 1;
+
+    // Compute Kaiser window
+    auto bessel_i0 = [](float x) {
+        float sum = 1.0f, term = 1.0f;
+        for (int k = 1; k <= 30; ++k) {
+            term *= (x / 2.0f) / k;
+            sum  += term * term;
+        }
+        return sum;
+    };
+
+    const float i0_beta = bessel_i0(beta);
+    m_firCoeffs.resize(N);
+
+    for (int n = 0; n < N; ++n) {
+        float sinc_val;
+        int center = n - M / 2;
+        if (center == 0)
+            sinc_val = 2.0f * fc;
+        else
+            sinc_val = std::sin(2.0f * k_pi * fc * center) / (k_pi * center);
+
+        float arg = 1.0f - static_cast<float>(2 * n - M) * static_cast<float>(2 * n - M)
+                         / static_cast<float>(M * M);
+        arg = std::max(0.0f, arg);
+        float window = bessel_i0(beta * std::sqrt(arg)) / i0_beta;
+        m_firCoeffs[n] = sinc_val * window;
+    }
+
+    // Gain normalisation
+    float gain = 0.0f;
+    for (float c : m_firCoeffs) gain += c;
+    if (gain > 0.0f)
+        for (float &c : m_firCoeffs) c /= gain;
+
+    m_firBuf.assign(N, 0.0f);
+}
+
+// ── AudioInput construction / destruction ─────────────────────────────────
+
+AudioInput::AudioInput(QObject *parent)
+    : QObject(parent)
+    , m_ring(k_ringSize, 0.0f)
+    , m_fftBuf(k_fftSize, 0.0f)
+{
+    buildFirFilter();
+    Pa_Initialize();
+}
+
+AudioInput::~AudioInput()
+{
+    stop();
+    Pa_Terminate();
+}
+
+// ── PortAudio callback ────────────────────────────────────────────────────────
+
+int AudioInput::paCallback(const void *input, void * /*output*/,
+                           unsigned long frameCount,
+                           const PaStreamCallbackTimeInfo * /*ti*/,
+                           PaStreamCallbackFlags /*flags*/,
+                           void *userData)
+{
+    auto *self = static_cast<AudioInput *>(userData);
+    const float *in = static_cast<const float *>(input);
+    if (in)
+        self->processInputBlock(in, frameCount);
+    return paContinue;
+}
+
+void AudioInput::processInputBlock(const float *stereoIn, unsigned long frames)
+{
+    // Extract left channel, apply FIR + 4:1 decimation → 12 kHz
+    for (unsigned long i = 0; i < frames; ++i) {
+        float sample = stereoIn[i * 2];  // left channel of stereo
+
+        // Shift FIR delay line
+        m_firBuf[m_firBufPos] = sample;
+        m_firBufPos = (m_firBufPos + 1) % k_firTaps;
+
+        ++m_decimPhase;
+        if (m_decimPhase < k_decimation) continue;
+        m_decimPhase = 0;
+
+        // Compute FIR output
+        float out = 0.0f;
+        int pos = m_firBufPos;
+        for (int k = 0; k < k_firTaps; ++k) {
+            pos = (pos - 1 + k_firTaps) % k_firTaps;
+            out += m_firCoeffs[k] * m_firBuf[pos];
+        }
+
+        // Write to ring buffer
+        int wp = m_writePos.load(std::memory_order_relaxed);
+        m_ring[wp % k_ringSize] = out;
+        m_writePos.store(wp + 1, std::memory_order_release);
+
+        // Accumulate for spectrum
+        m_fftBuf[m_specTimer % k_fftSize] = out;
+        ++m_specTimer;
+        if (m_specTimer == k_fftSize) {
+            computeSpectrum();
+            m_specTimer = 0;
+        }
+    }
+}
+
+void AudioInput::computeSpectrum()
+{
+    // Hann window + kiss_fft
+    std::vector<kiss_fft_cpx> in(k_fftSize), out(k_fftSize / 2 + 1);
+    kiss_fft_cfg cfg = kiss_fft_alloc(k_fftSize, 0, nullptr, nullptr);
+    if (!cfg) return;
+
+    for (int i = 0; i < k_fftSize; ++i) {
+        float w = 0.5f * (1.0f - std::cos(2.0f * k_pi * i / (k_fftSize - 1)));
+        in[i].r = m_fftBuf[i] * w;
+        in[i].i = 0.0f;
+    }
+
+    // Full complex FFT → take first half
+    std::vector<kiss_fft_cpx> full(k_fftSize);
+    kiss_fft(cfg, in.data(), full.data());
+    kiss_fft_free(cfg);
+
+    std::vector<float> magnitudes(k_fftSize / 2);
+    for (int i = 0; i < k_fftSize / 2; ++i) {
+        float re = full[i].r, im = full[i].i;
+        magnitudes[i] = std::sqrt(re * re + im * im);
+    }
+
+    emit spectrumReady(std::move(magnitudes), static_cast<float>(k_outputRate));
+}
+
+// ── start / stop ─────────────────────────────────────────────────────────────
+
+bool AudioInput::start(const QString &deviceName)
+{
+    if (m_running.load()) stop();
+
+    // Find device index
+    int deviceIndex = Pa_GetDefaultInputDevice();
+    if (!deviceName.isEmpty()) {
+        int count = Pa_GetDeviceCount();
+        for (int i = 0; i < count; ++i) {
+            const PaDeviceInfo *info = Pa_GetDeviceInfo(i);
+            if (info && info->maxInputChannels > 0) {
+                if (QString::fromUtf8(info->name).contains(deviceName, Qt::CaseInsensitive)) {
+                    deviceIndex = i;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (deviceIndex == paNoDevice) {
+        emit error(QStringLiteral("No audio input device found"));
+        return false;
+    }
+
+    PaStreamParameters params{};
+    params.device                    = deviceIndex;
+    params.channelCount              = 2;  // stereo (PCM2901 is stereo)
+    params.sampleFormat              = paFloat32;
+    params.suggestedLatency          = Pa_GetDeviceInfo(deviceIndex)->defaultLowInputLatency;
+    params.hostApiSpecificStreamInfo = nullptr;
+
+    PaError err = Pa_OpenStream(
+        &m_stream,
+        &params,
+        nullptr,         // no output
+        k_inputRate,     // 48 kHz
+        1024,            // frames per callback
+        paClipOff,
+        &AudioInput::paCallback,
+        this);
+
+    if (err != paNoError) {
+        emit error(QStringLiteral("Failed to open audio input: %1")
+                   .arg(QString::fromLatin1(Pa_GetErrorText(err))));
+        m_stream = nullptr;
+        return false;
+    }
+
+    err = Pa_StartStream(m_stream);
+    if (err != paNoError) {
+        Pa_CloseStream(m_stream);
+        m_stream = nullptr;
+        emit error(QStringLiteral("Failed to start audio input: %1")
+                   .arg(QString::fromLatin1(Pa_GetErrorText(err))));
+        return false;
+    }
+
+    m_running.store(true);
+    return true;
+}
+
+void AudioInput::stop()
+{
+    if (m_stream) {
+        Pa_StopStream(m_stream);
+        Pa_CloseStream(m_stream);
+        m_stream = nullptr;
+    }
+    m_running.store(false);
+}
+
+// ── Buffer accessors ──────────────────────────────────────────────────────────
+
+int AudioInput::readLatest(std::vector<float> &out, int nSamples)
+{
+    int wp = m_writePos.load(std::memory_order_acquire);
+    int available = std::min(wp, k_ringSize);
+    int n = std::min(nSamples, available);
+    if (n <= 0) return 0;
+
+    out.resize(n);
+    int start = (wp - n + k_ringSize) % k_ringSize;
+    for (int i = 0; i < n; ++i)
+        out[i] = m_ring[(start + i) % k_ringSize];
+    return n;
+}
+
+std::vector<int16_t> AudioInput::takePeriodBuffer(gfsk8::Submode submode, int &utcOut)
+{
+    const QDateTime u = QDateTime::currentDateTimeUtc();
+    utcOut = u.time().hour() * 100 + u.time().minute();
+    const int periodSamples = gfsk8::submodeParms(submode).periodSeconds * k_outputRate;
+    // Use the full 60-second ring buffer for best decoder performance
+    constexpr int bufSamples = k_ringSize;
+
+    int wp = m_writePos.load(std::memory_order_acquire);
+    int available = std::min(wp, k_ringSize);
+    int n = std::min(bufSamples, available);
+
+    std::vector<float> floatBuf(n);
+    int start = (wp - n + k_ringSize) % k_ringSize;
+    for (int i = 0; i < n; ++i)
+        floatBuf[i] = m_ring[(start + i) % k_ringSize];
+
+    // Convert float to int16 (scale by 32767)
+    std::vector<int16_t> result(n);
+    for (int i = 0; i < n; ++i)
+        result[i] = static_cast<int16_t>(std::clamp(floatBuf[i] * 32767.0f, -32767.0f, 32767.0f));
+
+    (void)periodSamples;  // we pass the full 60s buffer
+    return result;
+}
+
+QStringList AudioInput::availableDevices()
+{
+    QStringList names;
+    int count = Pa_GetDeviceCount();
+    for (int i = 0; i < count; ++i) {
+        const PaDeviceInfo *info = Pa_GetDeviceInfo(i);
+        if (info && info->maxInputChannels > 0)
+            names.append(QString::fromUtf8(info->name));
+    }
+    return names;
+}
