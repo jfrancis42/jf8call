@@ -6,8 +6,18 @@
 #include <QRegularExpression>
 #include <cmath>
 
-QString submodeName(int submodeEnum)
+QString submodeName(int submodeEnum, int modemType)
 {
+    if (modemType == 1) {
+        // Codec2 DATAC submode UI indices
+        switch (submodeEnum) {
+            case 0: return QStringLiteral("DATAC0");
+            case 1: return QStringLiteral("DATAC1");
+            case 2: return QStringLiteral("DATAC3");
+            default: return QStringLiteral("?");
+        }
+    }
+    // Gfsk8/JS8 bitmask values
     switch (submodeEnum) {
         case 0: return QStringLiteral("Normal");
         case 1: return QStringLiteral("Fast");
@@ -25,8 +35,8 @@ bool JS8Message::isAddressedToMe(const QString &mycall) const
     return to.toUpper() == mc;
 }
 
-JS8Message parseDecoded(const gfsk8::Decoded &d,
-                        const QString & /*rawText*/,
+JS8Message parseDecoded(const ModemDecoded &d,
+                        const QString &rawTextHint,
                         const QString &mycall)
 {
     JS8Message msg;
@@ -34,9 +44,28 @@ JS8Message parseDecoded(const gfsk8::Decoded &d,
     msg.audioFreqHz = d.frequencyHz;
     msg.snrDb       = d.snrDb;
     msg.submodeEnum = d.submode;
-    msg.submodeStr  = submodeName(d.submode);
+    msg.submodeStr  = submodeName(d.submode, d.modemType);
 
-    // Use DecodedText with the correct 3-arg constructor
+    if (d.isRawText) {
+        // Codec2 or other raw-text modem: message IS the human-readable text.
+        // Try to parse "CALLSIGN: body" framing.
+        msg.rawText = rawTextHint.isEmpty()
+            ? QString::fromStdString(d.message)
+            : rawTextHint;
+        const int colon = msg.rawText.indexOf(QStringLiteral(": "));
+        if (colon > 0 && colon <= 12) {
+            msg.from = msg.rawText.left(colon).trimmed().toUpper();
+            msg.body = msg.rawText.mid(colon + 2).trimmed();
+        } else {
+            msg.body = msg.rawText;
+        }
+        msg.type = JS8Message::Type::DirectedMessage;
+        msg.grid = extractGrid(msg.rawText);
+        Q_UNUSED(mycall)
+        return msg;
+    }
+
+    // JS8 path: use DecodedText with the correct 3-arg constructor
     DecodedText dt(d.message, d.frameType, d.submode);
 
     // The human-readable message string

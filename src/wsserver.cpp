@@ -13,8 +13,6 @@
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonValue>
-#include <gfsk8modem.h>
-
 // ── Construction ─────────────────────────────────────────────────────────────
 
 WsServer::WsServer(MainWindow *app, QObject *parent)
@@ -323,6 +321,7 @@ void WsServer::pushConfigChanged()
     QJsonObject d;
     d[QStringLiteral("callsign")]                   = c.callsign;
     d[QStringLiteral("grid")]                       = c.grid;
+    d[QStringLiteral("modem_type")]                 = c.modemType;
     d[QStringLiteral("submode")]                    = c.submode;
     d[QStringLiteral("frequency_khz")]              = c.frequencyKhz;
     d[QStringLiteral("tx_freq_hz")]                 = c.txFreqHz;
@@ -361,6 +360,7 @@ QJsonObject WsServer::cmdConfigGet(const QJsonObject &)
     d[QStringLiteral("grid")]                       = c.grid;
     d[QStringLiteral("audioInputName")]             = c.audioInputName;
     d[QStringLiteral("audioOutputName")]            = c.audioOutputName;
+    d[QStringLiteral("modemType")]                  = c.modemType;
     d[QStringLiteral("submode")]                    = c.submode;
     d[QStringLiteral("frequencyKhz")]               = c.frequencyKhz;
     d[QStringLiteral("txFreqHz")]                   = c.txFreqHz;
@@ -394,6 +394,8 @@ QJsonObject WsServer::cmdConfigSet(const QJsonObject &d)
         m_app->apiSetCallsign(d[QStringLiteral("callsign")].toString());
     if (d.contains(QStringLiteral("grid")))
         m_app->apiSetGrid(d[QStringLiteral("grid")].toString());
+    if (d.contains(QStringLiteral("modemType")))
+        m_app->apiSetModem(d[QStringLiteral("modemType")].toInt());
     if (d.contains(QStringLiteral("submode")))
         m_app->apiSetSubmode(d[QStringLiteral("submode")].toInt());
     if (d.contains(QStringLiteral("frequencyKhz")))
@@ -570,19 +572,27 @@ QJsonObject WsServer::cmdSpectrumGet(const QJsonObject &)
 
 // ── TX commands ───────────────────────────────────────────────────────────────
 
-static gfsk8::Submode parseSubmode(const QString &s, int fallback)
+// Returns a UI submode index.
+// Gfsk8/JS8: 0=Normal, 1=Fast, 2=Turbo, 3=Slow, 4=Ultra
+// Codec2 DATAC: 0=DATAC0, 1=DATAC1, 2=DATAC3
+static int parseSubmode(const QString &s, int fallback)
 {
     const QString lo = s.toLower();
-    if (lo == QLatin1String("normal") || lo == QLatin1String("a")) return gfsk8::Submode::Normal;
-    if (lo == QLatin1String("fast")   || lo == QLatin1String("b")) return gfsk8::Submode::Fast;
-    if (lo == QLatin1String("turbo")  || lo == QLatin1String("c")) return gfsk8::Submode::Turbo;
-    if (lo == QLatin1String("slow")   || lo == QLatin1String("e")) return gfsk8::Submode::Slow;
-    if (lo == QLatin1String("ultra")  || lo == QLatin1String("i")) return gfsk8::Submode::Ultra;
-    // Numeric fallback (0/1/2/4/8)
+    // JS8 named submodes
+    if (lo == QLatin1String("normal") || lo == QLatin1String("a")) return 0;
+    if (lo == QLatin1String("fast")   || lo == QLatin1String("b")) return 1;
+    if (lo == QLatin1String("turbo")  || lo == QLatin1String("c")) return 2;
+    if (lo == QLatin1String("slow")   || lo == QLatin1String("e")) return 3;
+    if (lo == QLatin1String("ultra")  || lo == QLatin1String("i")) return 4;
+    // Codec2 DATAC named submodes
+    if (lo == QLatin1String("datac0")) return 0;
+    if (lo == QLatin1String("datac1")) return 1;
+    if (lo == QLatin1String("datac3")) return 2;
+    // Numeric: treat as UI index
     bool ok;
     int v = lo.toInt(&ok);
-    if (ok) return static_cast<gfsk8::Submode>(v);
-    return static_cast<gfsk8::Submode>(fallback);
+    if (ok && v >= 0) return v;
+    return fallback;
 }
 
 QJsonObject WsServer::cmdTxSend(const QJsonObject &d)
@@ -592,7 +602,7 @@ QJsonObject WsServer::cmdTxSend(const QJsonObject &d)
         throw QStringLiteral("text is required");
 
     if (d.contains(QStringLiteral("submode"))) {
-        gfsk8::Submode sm = parseSubmode(
+        int sm = parseSubmode(
             d[QStringLiteral("submode")].toString(),
             m_app->apiConfig().submode);
         m_app->apiQueueTxSubmode(text, sm);

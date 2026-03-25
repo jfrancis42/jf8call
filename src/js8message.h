@@ -5,7 +5,7 @@
 #include <QObject>
 #include <QString>
 #include <QDateTime>
-#include <gfsk8modem.h>
+#include "imodem.h"
 
 // Parsed / decoded JS8 message ready for display and handling.
 struct JS8Message {
@@ -60,14 +60,14 @@ struct JS8Message {
     bool isAddressedToMe(const QString &mycall) const;
 };
 
-// Parses a gfsk8::Decoded struct (from the modem library) and the raw text
+// Parses a ModemDecoded struct (from the modem interface) and the raw text
 // from DecodedText into a JS8Message.
-JS8Message parseDecoded(const gfsk8::Decoded &d,
+JS8Message parseDecoded(const ModemDecoded &d,
                         const QString &rawText,
                         const QString &mycall);
 
-// Returns the submode name string.
-QString submodeName(int submodeEnum);
+// Returns the submode name string. modemType: 0=Gfsk8, 1=Codec2.
+QString submodeName(int submodeEnum, int modemType = 0);
 
 // Extract a Maidenhead grid locator from arbitrary text (returns empty if not found).
 QString extractGrid(const QString &text);

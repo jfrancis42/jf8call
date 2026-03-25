@@ -11,16 +11,17 @@
 
 static constexpr float k_pi  = 3.14159265358979323846f;
 static constexpr int   k_inputRate  = 48000;  // PortAudio capture rate
-static constexpr int   k_outputRate = 12000;  // after 4:1 decimation
 
 // ── FIR filter construction ──────────────────────────────────────────────────
-// 49-tap Kaiser-windowed lowpass, fc = 5400/48000 = 0.1125, beta = 6.0
-// Same coefficients as js8rx/main.cpp
+// 49-tap Kaiser-windowed lowpass.
+// fc = 0.45 * targetRate / inputRate  (90 % of Nyquist at the decimated rate).
+// For 12 kHz output: fc = 5400/48000 = 0.1125 (matches original js8rx/main.cpp).
+// For  8 kHz output: fc = 3600/48000 = 0.075.
 
 void AudioInput::buildFirFilter()
 {
     const int     N    = k_firTaps;
-    const float   fc   = 5400.0f / k_inputRate;
+    const float   fc   = 0.45f * static_cast<float>(m_targetRate) / static_cast<float>(k_inputRate);
     const float   beta = 6.0f;
     const int     M    = N - 1;
 
@@ -61,6 +62,25 @@ void AudioInput::buildFirFilter()
     m_firBuf.assign(N, 0.0f);
 }
 
+// ── Configuration ────────────────────────────────────────────────────────────
+
+void AudioInput::setTargetRate(int hz)
+{
+    if (hz != 12000 && hz != 8000) hz = 12000;
+    m_targetRate = hz;
+    m_decimation = k_inputRate / hz;  // 4 for 12kHz, 6 for 8kHz
+    buildFirFilter();
+    m_firBufPos  = 0;
+    m_decimPhase = 0;
+}
+
+void AudioInput::setChunkingEnabled(bool enable, int chunkMs)
+{
+    m_chunkingEnabled = enable;
+    m_chunkTarget     = enable ? (m_targetRate * chunkMs / 1000) : 0;
+    m_chunkBuf.clear();
+}
+
 // ── AudioInput construction / destruction ─────────────────────────────────
 
 AudioInput::AudioInput(QObject *parent)
@@ -95,7 +115,7 @@ int AudioInput::paCallback(const void *input, void * /*output*/,
 
 void AudioInput::processInputBlock(const float *stereoIn, unsigned long frames)
 {
-    // Extract left channel, apply FIR + 4:1 decimation → 12 kHz
+    // Extract left channel, apply FIR + N:1 decimation → m_targetRate
     for (unsigned long i = 0; i < frames; ++i) {
         float sample = stereoIn[i * 2];  // left channel of stereo
 
@@ -104,7 +124,7 @@ void AudioInput::processInputBlock(const float *stereoIn, unsigned long frames)
         m_firBufPos = (m_firBufPos + 1) % k_firTaps;
 
         ++m_decimPhase;
-        if (m_decimPhase < k_decimation) continue;
+        if (m_decimPhase < m_decimation) continue;
         m_decimPhase = 0;
 
         // Compute FIR output
@@ -126,6 +146,22 @@ void AudioInput::processInputBlock(const float *stereoIn, unsigned long frames)
         if (m_specTimer == k_fftSize) {
             computeSpectrum();
             m_specTimer = 0;
+        }
+
+        // Streaming chunk output (for Codec2 and other streaming modems)
+        if (m_chunkingEnabled && m_chunkTarget > 0) {
+            m_chunkBuf.push_back(out);
+            if (static_cast<int>(m_chunkBuf.size()) >= m_chunkTarget) {
+                // Convert float to int16 and emit
+                QByteArray ba;
+                ba.resize(static_cast<int>(m_chunkBuf.size() * sizeof(int16_t)));
+                int16_t *dst = reinterpret_cast<int16_t *>(ba.data());
+                for (size_t n = 0; n < m_chunkBuf.size(); ++n)
+                    dst[n] = static_cast<int16_t>(
+                        std::clamp(m_chunkBuf[n] * 32767.0f, -32767.0f, 32767.0f));
+                emit audioChunkReady(ba);
+                m_chunkBuf.clear();
+            }
         }
     }
 }
@@ -154,7 +190,7 @@ void AudioInput::computeSpectrum()
         magnitudes[i] = std::sqrt(re * re + im * im);
     }
 
-    emit spectrumReady(std::move(magnitudes), static_cast<float>(k_outputRate));
+    emit spectrumReady(std::move(magnitudes), static_cast<float>(m_targetRate));
 }
 
 // ── start / stop ─────────────────────────────────────────────────────────────
@@ -246,11 +282,10 @@ int AudioInput::readLatest(std::vector<float> &out, int nSamples)
     return n;
 }
 
-std::vector<int16_t> AudioInput::takePeriodBuffer(gfsk8::Submode submode, int &utcOut)
+std::vector<int16_t> AudioInput::takePeriodBuffer(int &utcOut)
 {
     const QDateTime u = QDateTime::currentDateTimeUtc();
     utcOut = u.time().hour() * 100 + u.time().minute();
-    const int periodSamples = gfsk8::submodeParms(submode).periodSeconds * k_outputRate;
     // Use the full 60-second ring buffer for best decoder performance
     constexpr int bufSamples = k_ringSize;
 
@@ -268,7 +303,6 @@ std::vector<int16_t> AudioInput::takePeriodBuffer(gfsk8::Submode submode, int &u
     for (int i = 0; i < n; ++i)
         result[i] = static_cast<int16_t>(std::clamp(floatBuf[i] * 32767.0f, -32767.0f, 32767.0f));
 
-    (void)periodSamples;  // we pass the full 60s buffer
     return result;
 }
 

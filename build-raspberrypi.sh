@@ -14,6 +14,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GFSK8MODEM_DIR="${GFSK8MODEM_DIR:-$HOME/gfsk8-modem-clean}"
+OLIVIA_MODEM_DIR="${OLIVIA_MODEM_DIR:-$HOME/olivia-modem}"
+PSK_MODEM_DIR="${PSK_MODEM_DIR:-$HOME/psk31}"
 BUILD_DIR="$SCRIPT_DIR/build-rpi"
 
 if [[ "${1:-}" == "--setup" ]]; then
@@ -85,13 +87,35 @@ cmake -B "$GFSK8MODEM_RPI_BUILD" -S "$GFSK8MODEM_DIR" \
     -DCMAKE_BUILD_TYPE=Release
 cmake --build "$GFSK8MODEM_RPI_BUILD"
 
+# Build olivia-modem for aarch64
+OLIVIA_RPI_BUILD="$OLIVIA_MODEM_DIR/build-rpi"
+echo "=== Building olivia-modem for aarch64 ==="
+cmake -B "$OLIVIA_RPI_BUILD" -S "$OLIVIA_MODEM_DIR" \
+    -G Ninja \
+    -DCMAKE_TOOLCHAIN_FILE="$SCRIPT_DIR/cmake/toolchain-raspberrypi-aarch64.cmake" \
+    -DCMAKE_BUILD_TYPE=Release
+cmake --build "$OLIVIA_RPI_BUILD"
+
+# Build libpsk for aarch64 (library only)
+PSK_RPI_BUILD="$PSK_MODEM_DIR/build-rpi"
+echo "=== Building libpsk for aarch64 ==="
+cmake -B "$PSK_RPI_BUILD" -S "$PSK_MODEM_DIR" \
+    -G Ninja \
+    -DCMAKE_TOOLCHAIN_FILE="$SCRIPT_DIR/cmake/toolchain-raspberrypi-aarch64.cmake" \
+    -DCMAKE_BUILD_TYPE=Release
+cmake --build "$PSK_RPI_BUILD" --target psk
+
 echo "=== Configuring JF8Call for aarch64 ==="
 cmake -B "$BUILD_DIR" -S "$SCRIPT_DIR" \
     -G Ninja \
     -DCMAKE_TOOLCHAIN_FILE="$SCRIPT_DIR/cmake/toolchain-raspberrypi-aarch64.cmake" \
     -DCMAKE_BUILD_TYPE=Release \
     -DGFSK8MODEM_DIR="$GFSK8MODEM_DIR" \
-    -DGFSK8MODEM_BUILD_DIR="$GFSK8MODEM_RPI_BUILD"
+    -DGFSK8MODEM_BUILD_DIR="$GFSK8MODEM_RPI_BUILD" \
+    -DOLIVIA_MODEM_DIR="$OLIVIA_MODEM_DIR" \
+    -DOLIVIA_MODEM_BUILD_DIR="$OLIVIA_RPI_BUILD" \
+    -DPSK_MODEM_DIR="$PSK_MODEM_DIR" \
+    -DPSK_MODEM_BUILD_DIR="$PSK_RPI_BUILD"
 
 echo "=== Building ==="
 cmake --build "$BUILD_DIR"

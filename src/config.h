@@ -4,7 +4,6 @@
 // Copyright (C) 2026 Ordo Artificum LLC
 
 #include <QString>
-#include <gfsk8modem.h>
 
 // All persistent configuration for JF8Call.
 // Loaded from / saved to ~/.jf8call/settings.json.
@@ -17,8 +16,11 @@ struct Config {
     QString audioInputName;    // PortAudio device name; empty = default
     QString audioOutputName;   // PortAudio device name; empty = default
 
-    // JS8 operating parameters
-    int     submode      = 0;          // 0=Normal 1=Fast 2=Turbo 3=Slow 4=Ultra
+    // Modem selection
+    int     modemType    = 0;          // 0=Gfsk8 (JS8-compatible), 1=Codec2 DATAC
+
+    // Operating parameters (submode index is per-modem)
+    int     submode      = 0;          // Gfsk8: 0=Normal…4=Ultra; Codec2: 0=DATAC0…2=DATAC3
     double  frequencyKhz = 14078.0;   // dial frequency (kHz)
     double  txFreqHz     = 1500.0;    // audio TX offset (Hz within passband)
     int     txPowerPct   = 50;        // 0-100

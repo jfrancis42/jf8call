@@ -42,6 +42,7 @@ Config Config::load()
     c.grid                      = o.value(u"grid").toString();
     c.audioInputName            = o.value(u"audioInputName").toString();
     c.audioOutputName           = o.value(u"audioOutputName").toString();
+    c.modemType                 = o.value(u"modemType").toInt(0);
     c.submode                   = o.value(u"submode").toInt(0);
     c.frequencyKhz              = o.value(u"frequencyKhz").toDouble(14078.0);
     c.txFreqHz                  = o.value(u"txFreqHz").toDouble(1500.0);
@@ -86,6 +87,7 @@ void Config::save() const
     o[u"grid"]                     = grid;
     o[u"audioInputName"]           = audioInputName;
     o[u"audioOutputName"]          = audioOutputName;
+    o[u"modemType"]                = modemType;
     o[u"submode"]                  = submode;
     o[u"frequencyKhz"]             = frequencyKhz;
     o[u"txFreqHz"]                 = txFreqHz;

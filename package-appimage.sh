@@ -39,8 +39,7 @@ rm -rf "$APPDIR"
 mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/share/applications" "$APPDIR/usr/share/icons/hicolor/256x256/apps"
 
 cp "$BUILD_DIR/jf8call" "$APPDIR/usr/bin/"
-cp "$SCRIPT_DIR/logo.jpg" "$APPDIR/usr/share/icons/hicolor/256x256/apps/jf8call.png" 2>/dev/null || \
-    convert "$SCRIPT_DIR/logo.jpg" "$APPDIR/usr/share/icons/hicolor/256x256/apps/jf8call.png" 2>/dev/null || true
+cp "$SCRIPT_DIR/jf8call.png" "$APPDIR/usr/share/icons/hicolor/256x256/apps/jf8call.png"
 
 cat > "$APPDIR/usr/share/applications/jf8call.desktop" << 'EOF'
 [Desktop Entry]

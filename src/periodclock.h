@@ -4,17 +4,16 @@
 
 #include <QObject>
 #include <QTimer>
-#include <gfsk8modem.h>
 
 class PeriodClock : public QObject {
     Q_OBJECT
 public:
     explicit PeriodClock(QObject *parent = nullptr);
 
-    // Set the active submode. Causes the next period boundary to be
+    // Set the period length in seconds. Causes the next period boundary to be
     // recalculated from the current time.
-    void setSubmode(gfsk8::Submode submode);
-    gfsk8::Submode submode() const { return m_submode; }
+    void setPeriodSeconds(int secs);
+    int periodSeconds() const { return m_periodSeconds; }
 
     void start();
     void stop();
@@ -35,6 +34,6 @@ private:
     void scheduleNext();
 
     QTimer      m_timer;
-    gfsk8::Submode m_submode = gfsk8::Submode::Normal;
+    int          m_periodSeconds = 15;  // Normal submode default
     bool         m_running = false;
 };

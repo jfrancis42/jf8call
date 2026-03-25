@@ -9,9 +9,9 @@ PeriodClock::PeriodClock(QObject *parent)
     connect(&m_timer, &QTimer::timeout, this, &PeriodClock::onTimer);
 }
 
-void PeriodClock::setSubmode(gfsk8::Submode submode)
+void PeriodClock::setPeriodSeconds(int secs)
 {
-    m_submode = submode;
+    m_periodSeconds = secs;
     if (m_running)
         scheduleNext();
 }
@@ -38,7 +38,7 @@ void PeriodClock::onTimer()
 void PeriodClock::scheduleNext()
 {
     const qint64 nowMs = QDateTime::currentDateTimeUtc().toMSecsSinceEpoch();
-    const int periodMs = gfsk8::submodeParms(m_submode).periodSeconds * 1000;
+    const int periodMs = m_periodSeconds * 1000;
     // Next boundary strictly after now
     const qint64 nextBoundaryMs = ((nowMs / periodMs) + 1) * periodMs;
     const int msUntilNext = static_cast<int>(nextBoundaryMs - nowMs);

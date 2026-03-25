@@ -18,6 +18,8 @@ CROSS_DIR="$HOME/Qt-cross"
 HAMLIB_WIN_DIR="$CROSS_DIR/hamlib-windows"
 PORTAUDIO_WIN_DIR="$CROSS_DIR/portaudio-windows"
 GFSK8MODEM_DIR="${GFSK8MODEM_DIR:-$HOME/gfsk8-modem-clean}"
+OLIVIA_MODEM_DIR="${OLIVIA_MODEM_DIR:-$HOME/olivia-modem}"
+PSK_MODEM_DIR="${PSK_MODEM_DIR:-$HOME/psk31}"
 # Qt version for Windows target must match the host (system) Qt version so that
 # QT_HOST_PATH cross-compilation tool discovery works (same moc/rcc version).
 QT_VERSION="6.9.2"
@@ -105,6 +107,24 @@ cmake -B "$GFSK8MODEM_WIN_BUILD" -S "$GFSK8MODEM_DIR" \
 cmake --build "$GFSK8MODEM_WIN_BUILD"
 GFSK8MODEM_WIN_LIB="$GFSK8MODEM_WIN_BUILD/libgfsk8modem.a"
 
+# Build olivia-modem for Windows
+OLIVIA_WIN_BUILD="$OLIVIA_MODEM_DIR/build-windows"
+echo "=== Building olivia-modem for Windows ==="
+cmake -B "$OLIVIA_WIN_BUILD" -S "$OLIVIA_MODEM_DIR" \
+    -G Ninja \
+    -DCMAKE_TOOLCHAIN_FILE="$SCRIPT_DIR/cmake/toolchain-windows-mingw64.cmake" \
+    -DCMAKE_BUILD_TYPE=Release
+cmake --build "$OLIVIA_WIN_BUILD"
+
+# Build libpsk for Windows (library only — apps use POSIX headers unavailable on Windows)
+PSK_WIN_BUILD="$PSK_MODEM_DIR/build-windows"
+echo "=== Building libpsk for Windows ==="
+cmake -B "$PSK_WIN_BUILD" -S "$PSK_MODEM_DIR" \
+    -G Ninja \
+    -DCMAKE_TOOLCHAIN_FILE="$SCRIPT_DIR/cmake/toolchain-windows-mingw64.cmake" \
+    -DCMAKE_BUILD_TYPE=Release
+cmake --build "$PSK_WIN_BUILD" --target psk
+
 echo "=== Configuring JF8Call for Windows ==="
 cmake -B "$BUILD_DIR" -S "$SCRIPT_DIR" \
     -G Ninja \
@@ -112,6 +132,10 @@ cmake -B "$BUILD_DIR" -S "$SCRIPT_DIR" \
     -DCMAKE_BUILD_TYPE=Release \
     -DGFSK8MODEM_DIR="$GFSK8MODEM_DIR" \
     -DGFSK8MODEM_BUILD_DIR="$GFSK8MODEM_WIN_BUILD" \
+    -DOLIVIA_MODEM_DIR="$OLIVIA_MODEM_DIR" \
+    -DOLIVIA_MODEM_BUILD_DIR="$OLIVIA_WIN_BUILD" \
+    -DPSK_MODEM_DIR="$PSK_MODEM_DIR" \
+    -DPSK_MODEM_BUILD_DIR="$PSK_WIN_BUILD" \
     -DQT_WINDOWS_DIR="$QT_WIN_DIR" \
     -DQT_HOST_PATH=/usr \
     -DQT_HOST_PATH_CMAKE_DIR=/usr/lib/x86_64-linux-gnu/cmake \

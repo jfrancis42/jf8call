@@ -124,6 +124,7 @@ Reply `data` — all persistent config fields:
   "data": {
     "callsign": "W5XYZ",
     "grid": "DM79AA",
+    "modemType": 0,
     "submode": 0,
     "frequencyKhz": 14078.0,
     "txFreqHz": 1500.0,
@@ -137,6 +138,12 @@ Reply `data` — all persistent config fields:
 ```
 
 All fields are optional. Only supplied fields are updated. Changes are saved to disk and a `config.changed` event is broadcast to all clients. Audio is restarted if the audio device name changes.
+
+`modemType` values: `0` = JS8/GFSK8, `1` = Codec2 DATAC, `2` = Olivia, `3` = PSK. Switching modem resets `submode` to the modem's default.
+
+PSK `submode` values: `0`=BPSK31, `1`=BPSK63 (default), `2`=BPSK125, `3`=PSK63F, `4`=PSK125R, `5`=PSK250R, `6`=PSK500R.
+
+Olivia `submode` values: `0`=8/500 (default), `1`=4/250, `2`=8/250, `3`=16/500, `4`=8/1000, `5`=16/1000, `6`=32/1000.
 
 ---
 

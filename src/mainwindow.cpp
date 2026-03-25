@@ -40,7 +40,16 @@
 #include <cmath>
 #include <algorithm>
 
-#include <gfsk8modem.h>
+#include "gfsk8_modem.h"
+#ifdef HAVE_CODEC2
+#include "codec2_modem.h"
+#endif
+#ifdef HAVE_OLIVIA
+#include "olivia_modem.h"
+#endif
+#ifdef HAVE_PSK_MODEM
+#include "psk_modem.h"
+#endif
 #include "jf8call_version.h"
 #include "buildinfo.h"
 #include "updatechecker.h"
@@ -49,37 +58,61 @@
 #include "messageinbox.h"
 
 // ── Decode worker ─────────────────────────────────────────────────────────────
-// Runs gfsk8::Decoder in a background thread; emits results as QVariantMaps.
+// Runs IModem::feedAudio in a background thread; emits results as QVariantMaps.
 
 class DecodeWorker : public QObject {
     Q_OBJECT
 public:
-    explicit DecodeWorker(QObject *parent = nullptr)
+    explicit DecodeWorker(int modemType, int submode = 0, QObject *parent = nullptr)
         : QObject(parent)
-        , m_decoder(gfsk8::AllSubmodes)
-    {}
+    {
+#ifdef HAVE_CODEC2
+        if (modemType == 1) {
+            m_modem = std::make_unique<Codec2Modem>(submode);
+        } else
+#endif
+#ifdef HAVE_OLIVIA
+        if (modemType == 2) {
+            m_modem = std::make_unique<OliviaModem>(submode);
+        } else
+#endif
+#ifdef HAVE_PSK_MODEM
+        if (modemType == 3) {
+            m_modem = std::make_unique<PskModem>(submode);
+        } else
+#endif
+        {
+            m_modem = std::make_unique<Gfsk8Modem>();
+            Q_UNUSED(modemType)
+            Q_UNUSED(submode)
+        }
+    }
 
 public slots:
-    void decode(QByteArray samples48k, int utc, int submodes)
+    void decode(QByteArray samples, int utc, int /*submodes*/)
     {
-        // samples48k contains int16 data at 12 kHz
-        const int16_t *ptr = reinterpret_cast<const int16_t *>(samples48k.constData());
-        size_t count = static_cast<size_t>(samples48k.size() / sizeof(int16_t));
+        const int16_t *ptr = reinterpret_cast<const int16_t *>(samples.constData());
+        size_t count = static_cast<size_t>(samples.size() / sizeof(int16_t));
 
         QList<QVariantMap> results;
-        m_decoder.decode(
+        m_modem->feedAudio(
             std::span<const int16_t>(ptr, count),
             utc,
-            [&](const gfsk8::Decoded &d) {
-                // Parse the raw decoded text using DecodedText
-                DecodedText dt(d.message, d.frameType, d.submode);
+            [&](const ModemDecoded &d) {
                 QVariantMap m;
-                m[QStringLiteral("message")]  = QString::fromStdString(d.message);
-                m[QStringLiteral("rawText")]  = QString::fromStdString(dt.message());
-                m[QStringLiteral("snrDb")]    = d.snrDb;
-                m[QStringLiteral("freqHz")]   = d.frequencyHz;
-                m[QStringLiteral("submode")]  = d.submode;
-                m[QStringLiteral("frameType")]= d.frameType;
+                m[QStringLiteral("modemType")] = d.modemType;
+                m[QStringLiteral("isRawText")] = d.isRawText;
+                m[QStringLiteral("message")]   = QString::fromStdString(d.message);
+                if (d.isRawText) {
+                    m[QStringLiteral("rawText")] = QString::fromStdString(d.message);
+                } else {
+                    DecodedText dt(d.message, d.frameType, d.submode);
+                    m[QStringLiteral("rawText")] = QString::fromStdString(dt.message());
+                }
+                m[QStringLiteral("snrDb")]     = d.snrDb;
+                m[QStringLiteral("freqHz")]    = d.frequencyHz;
+                m[QStringLiteral("submode")]   = d.submode;
+                m[QStringLiteral("frameType")] = d.frameType;
                 results.append(m);
             });
         emit decodeFinished(results);
@@ -89,7 +122,7 @@ signals:
     void decodeFinished(QList<QVariantMap> results);
 
 private:
-    gfsk8::Decoder m_decoder;
+    std::unique_ptr<IModem> m_modem;
 };
 
 // ── MainWindow ────────────────────────────────────────────────────────────────
@@ -101,8 +134,27 @@ MainWindow::MainWindow(QWidget *parent)
     , m_audioOut(new AudioOutput(this))
     , m_periodClock(new PeriodClock(this))
     , m_hamlib(new HamlibController)
+    , m_modem(std::make_unique<Gfsk8Modem>())
 {
     m_config = Config::load();
+
+    // Restore configured modem type
+#ifdef HAVE_CODEC2
+    if (m_config.modemType == 1)
+        m_modem = std::make_unique<Codec2Modem>(m_config.submode);
+    else
+#endif
+#ifdef HAVE_OLIVIA
+    if (m_config.modemType == 2)
+        m_modem = std::make_unique<OliviaModem>(m_config.submode);
+    else
+#endif
+#ifdef HAVE_PSK_MODEM
+    if (m_config.modemType == 3)
+        m_modem = std::make_unique<PskModem>(m_config.submode);
+    else
+#endif
+        m_modem = std::make_unique<Gfsk8Modem>();
 
     setupUi();
     applyStyleSheet();
@@ -120,21 +172,28 @@ MainWindow::MainWindow(QWidget *parent)
     m_hamlibThread->start();
 
     // Decode worker in its own thread
-    m_decodeThread = new QThread(this);
-    auto *worker = new DecodeWorker;
-    worker->moveToThread(m_decodeThread);
-    connect(m_decodeThread, &QThread::finished, worker, &QObject::deleteLater);
-    connect(this, &MainWindow::requestDecode, worker, &DecodeWorker::decode,
-            Qt::QueuedConnection);
-    connect(worker, &DecodeWorker::decodeFinished,
-            this, &MainWindow::onDecodeFinished, Qt::QueuedConnection);
-    m_decodeThread->start();
+    restartDecodeWorker();
+
+    // Streaming TX timer (fires when a streaming modem has queued TX frames)
+    m_streamTxTimer = new QTimer(this);
+    m_streamTxTimer->setInterval(500);
+    m_streamTxTimer->setSingleShot(false);
+    connect(m_streamTxTimer, &QTimer::timeout, this, &MainWindow::onStreamTxTimer);
 
     // Period clock
     connect(m_periodClock, &PeriodClock::periodStarted,
             this, &MainWindow::onPeriodStarted);
-    m_periodClock->setSubmode(static_cast<gfsk8::Submode>(m_config.submode));
-    m_periodClock->start();
+
+    const bool isPeriodic = (m_modem->submodeParms(0).periodSeconds > 0);
+    if (isPeriodic) {
+        m_periodClock->setPeriodSeconds(m_modem->submodeParms(m_config.submode).periodSeconds);
+        m_periodClock->start();
+    } else {
+        m_audioChunkConn = connect(
+            m_audioIn, &AudioInput::audioChunkReady,
+            this, &MainWindow::onAudioChunkReady, Qt::QueuedConnection);
+        m_streamTxTimer->start();
+    }
 
     // Audio input spectrum → waterfall
     connect(m_audioIn, &AudioInput::spectrumReady,
@@ -349,15 +408,6 @@ void MainWindow::setupMenuBar()
         vbox->setSpacing(12);
         vbox->setContentsMargins(20, 20, 20, 20);
 
-        // Logo
-        auto *logoLbl = new QLabel(&dlg);
-        QPixmap logo(QStringLiteral(":/logo.jpg"));
-        if (!logo.isNull()) {
-            logoLbl->setPixmap(logo.scaledToWidth(460, Qt::SmoothTransformation));
-            logoLbl->setAlignment(Qt::AlignCenter);
-            vbox->addWidget(logoLbl);
-        }
-
         auto *nameLbl = new QLabel(QStringLiteral("JF8Call"), &dlg);
         QFont nameFont = nameLbl->font();
         nameFont.setPointSize(22);
@@ -461,14 +511,14 @@ void MainWindow::setupToolBar()
     tb->addWidget(modeLabel);
 
     m_submodeCbo = new QComboBox;
-    m_submodeCbo->addItems({tr("Normal (15s)"), tr("Fast (10s)"),
-                            tr("Turbo (6s)"),  tr("Slow (30s)"), tr("Ultra (4s)")});
-    m_submodeCbo->setCurrentIndex(m_config.submode);
+    refreshSubmodeCombo();
     connect(m_submodeCbo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this](int idx) {
                 m_config.submode = idx;
                 m_config.save();
-                m_periodClock->setSubmode(static_cast<gfsk8::Submode>(idx));
+                const int period = m_modem->submodeParms(idx).periodSeconds;
+                if (period > 0)
+                    m_periodClock->setPeriodSeconds(period);
                 if (m_wsServer) m_wsServer->pushConfigChanged();
             });
     tb->addWidget(m_submodeCbo);
@@ -867,6 +917,10 @@ QScrollBar::handle:vertical {
 void MainWindow::startAudio()
 {
     if (m_audioStarted) return;
+    const int rate = m_modem->sampleRate();
+    m_audioIn->setTargetRate(rate);
+    const bool streaming = (m_modem->submodeParms(0).periodSeconds == 0);
+    m_audioIn->setChunkingEnabled(streaming, 100);
     if (!m_audioIn->start(m_config.audioInputName)) return;
     m_audioOut->open(m_config.audioOutputName);
     m_audioStarted = true;
@@ -877,6 +931,82 @@ void MainWindow::stopAudio()
     m_audioIn->stop();
     m_audioOut->close();
     m_audioStarted = false;
+}
+
+void MainWindow::restartDecodeWorker()
+{
+    if (m_decodeThread) {
+        disconnect(this, &MainWindow::requestDecode, nullptr, nullptr);
+        m_decodeThread->quit();
+        m_decodeThread->wait();
+        delete m_decodeThread;
+        m_decodeThread = nullptr;
+    }
+    m_decodeThread = new QThread(this);
+    auto *worker = new DecodeWorker(m_config.modemType, m_config.submode);
+    worker->moveToThread(m_decodeThread);
+    connect(m_decodeThread, &QThread::finished, worker, &QObject::deleteLater);
+    connect(this, &MainWindow::requestDecode, worker, &DecodeWorker::decode, Qt::QueuedConnection);
+    connect(worker, &DecodeWorker::decodeFinished, this, &MainWindow::onDecodeFinished, Qt::QueuedConnection);
+    m_decodeThread->start();
+}
+
+void MainWindow::refreshSubmodeCombo()
+{
+    if (!m_submodeCbo) return;
+    QSignalBlocker b(m_submodeCbo);
+    m_submodeCbo->clear();
+    const int n = m_modem->submodeCount();
+    for (int i = 0; i < n; ++i) {
+        const auto &p = m_modem->submodeParms(i);
+        QString label = QString::fromStdString(p.name);
+        if (p.periodSeconds > 0)
+            label += QStringLiteral(" (%1s)").arg(p.periodSeconds);
+        m_submodeCbo->addItem(label);
+    }
+    const int cur = std::clamp(m_config.submode, 0, n - 1);
+    m_submodeCbo->setCurrentIndex(cur);
+}
+
+void MainWindow::transmitNextFrame()
+{
+    if (m_pendingTxFrames.isEmpty()) return;
+    if (m_transmitting) return;
+
+    const QVariantMap &frame  = m_pendingTxFrames.first();
+    const QString      payload   = frame[QStringLiteral("payload")].toString();
+    const int          frameType = frame[QStringLiteral("frameType")].toInt();
+    const int          submodeInt = frame[QStringLiteral("submode")].toInt();
+
+    ModemTxFrame txf;
+    txf.payload   = payload.toStdString();
+    txf.frameType = frameType;
+    txf.submode   = submodeInt;
+    auto pcmNative = m_modem->modulate(txf, m_config.txFreqHz);
+    if (!pcmNative.empty()) {
+        const int ratio = 48000 / m_modem->sampleRate();
+        std::vector<int16_t> pcm48k;
+        pcm48k.reserve(pcmNative.size() * ratio);
+        for (size_t i = 0; i + 1 < pcmNative.size(); ++i) {
+            for (int j = 0; j < ratio; ++j) {
+                float t = j / static_cast<float>(ratio);
+                float s = pcmNative[i] * (1.0f - t) + pcmNative[i + 1] * t;
+                pcm48k.push_back(static_cast<int16_t>(
+                    std::clamp(s * 32767.0f, -32767.0f, 32767.0f)));
+            }
+        }
+        float last = pcmNative.back();
+        for (int j = 0; j < ratio; ++j)
+            pcm48k.push_back(static_cast<int16_t>(
+                std::clamp(last * 32767.0f, -32767.0f, 32767.0f)));
+
+        setTransmitting(true);
+        QMetaObject::invokeMethod(m_hamlib, [this]() {
+            m_hamlib->setPtt(true);
+        }, Qt::QueuedConnection);
+        m_audioOut->play(std::move(pcm48k));
+    }
+    m_pendingTxFrames.removeFirst();
 }
 
 // ── Slots ─────────────────────────────────────────────────────────────────────
@@ -896,56 +1026,16 @@ void MainWindow::onPeriodStarted(int utc)
     // Trigger decode with the current ring buffer contents
     if (!m_transmitting && m_audioIn->isRunning()) {
         int utcCode = utc;
-        auto samples = m_audioIn->takePeriodBuffer(
-            static_cast<gfsk8::Submode>(m_config.submode), utcCode);
+        auto samples = m_audioIn->takePeriodBuffer(utcCode);
         if (!samples.empty()) {
             QByteArray ba(reinterpret_cast<const char *>(samples.data()),
                           static_cast<int>(samples.size() * sizeof(int16_t)));
-            emit requestDecode(ba, utcCode, gfsk8::AllSubmodes);
+            emit requestDecode(ba, utcCode, 0);
         }
     }
 
     // Advance TX queue
-    if (!m_pendingTxFrames.isEmpty()) {
-        const QVariantMap &frame = m_pendingTxFrames.first();
-        const QString payload   = frame[QStringLiteral("payload")].toString();
-        const int frameType     = frame[QStringLiteral("frameType")].toInt();
-        const int submodeInt    = frame[QStringLiteral("submode")].toInt();
-
-        const gfsk8::Submode sm   = static_cast<gfsk8::Submode>(submodeInt);
-        const double txFreqHz   = m_config.txFreqHz;
-
-        auto pcm12k = gfsk8::modulate(sm, frameType,
-                                    payload.toStdString(), txFreqHz);
-        if (!pcm12k.empty()) {
-            // Upsample 4:1 to 48 kHz
-            std::vector<int16_t> pcm48k;
-            pcm48k.reserve(pcm12k.size() * 4);
-            for (size_t i = 0; i + 1 < pcm12k.size(); ++i) {
-                for (int j = 0; j < 4; ++j) {
-                    float t = j / 4.0f;
-                    float s = pcm12k[i] * (1.0f - t) + pcm12k[i + 1] * t;
-                    pcm48k.push_back(static_cast<int16_t>(
-                        std::clamp(s * 32767.0f, -32767.0f, 32767.0f)));
-                }
-            }
-            // Last sample
-            float last = pcm12k.back();
-            for (int j = 0; j < 4; ++j)
-                pcm48k.push_back(static_cast<int16_t>(
-                    std::clamp(last * 32767.0f, -32767.0f, 32767.0f)));
-
-            setTransmitting(true);
-            // PTT on
-            QMetaObject::invokeMethod(m_hamlib, [this]() {
-                m_hamlib->setPtt(true);
-            }, Qt::QueuedConnection);
-
-            m_audioOut->play(std::move(pcm48k));
-        }
-
-        m_pendingTxFrames.removeFirst();
-    }
+    transmitNextFrame();
 
     ++m_periodCount;
 }
@@ -958,7 +1048,23 @@ void MainWindow::onPlaybackFinished()
     }, Qt::QueuedConnection);
 
     setTransmitting(false);
-    // If more frames queued, they'll be sent on the next period boundary
+    // For streaming modems, fire the next queued frame immediately.
+    // For period-based modems it will be picked up at the next period boundary.
+    const bool streaming = m_modem && (m_modem->submodeParms(0).periodSeconds == 0);
+    if (streaming && !m_pendingTxFrames.isEmpty())
+        transmitNextFrame();
+}
+
+void MainWindow::onAudioChunkReady(QByteArray chunk)
+{
+    if (m_transmitting) return;  // half-duplex: skip decode during TX
+    emit requestDecode(chunk, 0, 0);
+}
+
+void MainWindow::onStreamTxTimer()
+{
+    if (!m_transmitting && !m_pendingTxFrames.isEmpty())
+        transmitNextFrame();
 }
 
 void MainWindow::onDecodeFinished(const QList<QVariantMap> &results)
@@ -999,13 +1105,14 @@ void MainWindow::onDecodeFinished(const QList<QVariantMap> &results)
         const int     snrDb     = m[QStringLiteral("snrDb")].toInt();
         const int     submode   = m[QStringLiteral("submode")].toInt();
 
-        // Build a gfsk8::Decoded struct for parseDecoded
-        gfsk8::Decoded d;
+        ModemDecoded d;
         d.message     = m[QStringLiteral("message")].toString().toStdString();
         d.frequencyHz = freqHz;
         d.snrDb       = snrDb;
         d.submode     = submode;
         d.frameType   = m[QStringLiteral("frameType")].toInt();
+        d.modemType   = m[QStringLiteral("modemType")].toInt();
+        d.isRawText   = m[QStringLiteral("isRawText")].toBool();
 
         JS8Message msg = parseDecoded(d, rawText.isEmpty() ? QString::fromStdString(d.message) : rawText,
                                       m_config.callsign);
@@ -1506,20 +1613,19 @@ void MainWindow::transmitMessage(const QString &text, const QString &gridOverrid
     }
 
     const QString grid = gridOverride.isEmpty() ? m_config.grid : gridOverride;
-    const gfsk8::Submode sm = static_cast<gfsk8::Submode>(m_config.submode);
-    auto frames = gfsk8::pack(m_config.callsign.toStdString(),
-                            grid.toStdString(),
-                            txText.toStdString(), sm);
+    auto frames = m_modem->pack(m_config.callsign.toStdString(),
+                                grid.toStdString(),
+                                txText.toStdString(), m_config.submode);
     if (frames.empty()) {
         statusBar()->showMessage(tr("Failed to encode message"), 3000);
         return;
     }
 
-    for (const gfsk8::TxFrame &f : frames) {
+    for (const ModemTxFrame &f : frames) {
         QVariantMap m;
         m[QStringLiteral("payload")]   = QString::fromStdString(f.payload);
         m[QStringLiteral("frameType")] = f.frameType;
-        m[QStringLiteral("submode")]   = static_cast<int>(sm);
+        m[QStringLiteral("submode")]   = f.submode;
         m_pendingTxFrames.append(m);
     }
 
@@ -1554,13 +1660,13 @@ void MainWindow::onHeartbeatCheck()
 {
     if (!m_config.heartbeatEnabled) return;
     if (m_config.callsign.isEmpty()) return;
-    const gfsk8::Submode sm = static_cast<gfsk8::Submode>(m_config.submode);
-    const int period = gfsk8::submodeParms(sm).periodSeconds;
-    // Fire heartbeat every heartbeatIntervalPeriods periods
-    // (approximate — just count seconds)
+    const int period = m_modem->submodeParms(m_config.submode).periodSeconds;
+    // For streaming modems (period==0), use 30s as heartbeat base period.
+    const int effectivePeriod = (period > 0) ? period : 30;
+    // Fire heartbeat every heartbeatIntervalPeriods periods (approximate — count seconds)
     static int secs = 0;
     ++secs;
-    if (secs >= period * m_config.heartbeatIntervalPeriods) {
+    if (secs >= effectivePeriod * m_config.heartbeatIntervalPeriods) {
         secs = 0;
         const QString grid4 = m_config.grid.left(4);
         transmitMessage(m_config.callsign + QStringLiteral(": @HB HEARTBEAT ") + grid4, grid4);
@@ -1881,6 +1987,97 @@ void MainWindow::onPreferences()
 
     vbox->addWidget(audioGroup);
 
+    // ── Modem ────────────────────────────────────────────────────────────────
+    auto *modemGroup = new QGroupBox(tr("Modem"), content);
+    auto *modemForm  = new QFormLayout(modemGroup);
+
+    auto *modemTypeCbo = new QComboBox(modemGroup);
+    modemTypeCbo->addItem(tr("JS8 / GFSK8 (HF digital)"), 0);
+#ifdef HAVE_CODEC2
+    modemTypeCbo->addItem(tr("Codec2 DATAC (HF data)"), 1);
+#else
+    modemTypeCbo->addItem(tr("Codec2 DATAC (not compiled in)"), 1);
+    modemTypeCbo->setItemData(1, false, Qt::UserRole - 1);  // disable
+#endif
+#ifdef HAVE_OLIVIA
+    modemTypeCbo->addItem(tr("Olivia (streaming HF)"), 2);
+#else
+    modemTypeCbo->addItem(tr("Olivia (not compiled in)"), 2);
+    modemTypeCbo->setItemData(2, false, Qt::UserRole - 1);
+#endif
+#ifdef HAVE_PSK_MODEM
+    modemTypeCbo->addItem(tr("PSK (streaming HF)"), 3);
+#else
+    modemTypeCbo->addItem(tr("PSK (not compiled in)"), 3);
+    modemTypeCbo->setItemData(3, false, Qt::UserRole - 1);
+#endif
+    modemTypeCbo->setCurrentIndex(m_config.modemType);
+    modemForm->addRow(tr("Modem type:"), modemTypeCbo);
+
+    // Speed combo — populated dynamically based on modem type
+    auto *modemSpeedCbo = new QComboBox(modemGroup);
+    auto populateSpeedCbo = [&](int mtype) {
+        modemSpeedCbo->clear();
+        // Build a temporary modem to query submode names
+        std::unique_ptr<IModem> tmp;
+#ifdef HAVE_CODEC2
+        if (mtype == 1)
+            tmp = std::make_unique<Codec2Modem>(0);
+        else
+#endif
+#ifdef HAVE_OLIVIA
+        if (mtype == 2)
+            tmp = std::make_unique<OliviaModem>(0);
+        else
+#endif
+#ifdef HAVE_PSK_MODEM
+        if (mtype == 3)
+            tmp = std::make_unique<PskModem>(0);
+        else
+#endif
+            tmp = std::make_unique<Gfsk8Modem>();
+        const int n = tmp->submodeCount();
+        for (int i = 0; i < n; ++i) {
+            const auto &p = tmp->submodeParms(i);
+            QString label = QString::fromStdString(p.name);
+            if (p.periodSeconds > 0)
+                label += QStringLiteral(" (%1s)").arg(p.periodSeconds);
+            modemSpeedCbo->addItem(label);
+        }
+        // Select current submode when same modem type, else sensible default
+        int def = 0;
+#ifdef HAVE_PSK_MODEM
+        if (mtype == 3) def = 1;  // PSK defaults to BPSK63 (index 1)
+#endif
+        const int cur = (mtype == m_config.modemType)
+            ? std::clamp(m_config.submode, 0, n - 1) : def;
+        modemSpeedCbo->setCurrentIndex(cur);
+    };
+    populateSpeedCbo(m_config.modemType);
+    modemForm->addRow(tr("Speed:"), modemSpeedCbo);
+
+    connect(modemTypeCbo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            modemGroup, [&, populateSpeedCbo](int idx) {
+#ifndef HAVE_CODEC2
+                if (idx == 1) { modemTypeCbo->setCurrentIndex(0); return; }
+#endif
+#ifndef HAVE_OLIVIA
+                if (idx == 2) { modemTypeCbo->setCurrentIndex(0); return; }
+#endif
+#ifndef HAVE_PSK_MODEM
+                if (idx == 3) { modemTypeCbo->setCurrentIndex(0); return; }
+#endif
+                populateSpeedCbo(modemTypeCbo->itemData(idx).toInt());
+            });
+
+    auto *modemNote = new QLabel(
+        tr("<i>Changing the modem type restarts the audio chain.</i>"), modemGroup);
+    modemNote->setWordWrap(true);
+    modemNote->setStyleSheet(QStringLiteral("color: #c9a84c;"));
+    modemForm->addRow(modemNote);
+
+    vbox->addWidget(modemGroup);
+
     // ── Operating ───────────────────────────────────────────────────────────
     auto *opGroup = new QGroupBox(tr("Operating"), content);
     auto *opForm  = new QFormLayout(opGroup);
@@ -1969,6 +2166,11 @@ void MainWindow::onPreferences()
     const QString newInDev  = devName(inDevCombo);
     const QString newOutDev = devName(outDevCombo);
 
+    const int  newModemType = modemTypeCbo->currentData().toInt();
+    const int  newSubmode   = modemSpeedCbo->currentIndex();
+    const bool modemChanged = (newModemType != m_config.modemType);
+    const bool submodeChanged = (!modemChanged && newSubmode != m_config.submode);
+
     const bool audioChanged =
         (m_config.audioInputName  != newInDev ||
          m_config.audioOutputName != newOutDev);
@@ -1999,8 +2201,15 @@ void MainWindow::onPreferences()
     // Update distance unit in model
     m_model->setDistanceMiles(m_config.distMiles);
 
-    if (m_wsServer) m_wsServer->pushConfigChanged();
-    if (audioChanged) { stopAudio(); startAudio(); }
+    // Apply modem type change (also restarts audio)
+    if (modemChanged) {
+        apiSetModem(newModemType);
+    } else {
+        if (submodeChanged)
+            apiSetSubmode(newSubmode);
+        if (audioChanged) { stopAudio(); startAudio(); }
+        if (m_wsServer) m_wsServer->pushConfigChanged();
+    }
 }
 
 void MainWindow::onWaterfallFreqClicked(float hz)
@@ -2095,10 +2304,12 @@ void MainWindow::apiSetGrid(const QString &s)
 
 void MainWindow::apiSetSubmode(int idx)
 {
-    if (idx < 0 || idx > 4) return;
+    if (idx < 0 || idx >= m_modem->submodeCount()) return;
     m_config.submode = idx;
     { QSignalBlocker b(m_submodeCbo); m_submodeCbo->setCurrentIndex(idx); }
-    m_periodClock->setSubmode(static_cast<gfsk8::Submode>(idx));
+    const int period = m_modem->submodeParms(idx).periodSeconds;
+    if (period > 0)
+        m_periodClock->setPeriodSeconds(period);
     m_config.save();
     if (m_wsServer) m_wsServer->pushConfigChanged();
 }
@@ -2203,17 +2414,17 @@ void MainWindow::apiQueueTx(const QString &text)
     transmitMessage(text);
 }
 
-void MainWindow::apiQueueTxSubmode(const QString &text, gfsk8::Submode submode)
+void MainWindow::apiQueueTxSubmode(const QString &text, int submode)
 {
     if (m_config.callsign.isEmpty()) return;
-    auto frames = gfsk8::pack(m_config.callsign.toStdString(),
-                            m_config.grid.toStdString(),
-                            text.toStdString(), submode);
-    for (const gfsk8::TxFrame &f : frames) {
+    auto frames = m_modem->pack(m_config.callsign.toStdString(),
+                                m_config.grid.toStdString(),
+                                text.toStdString(), submode);
+    for (const ModemTxFrame &f : frames) {
         QVariantMap m;
         m[QStringLiteral("payload")]   = QString::fromStdString(f.payload);
         m[QStringLiteral("frameType")] = f.frameType;
-        m[QStringLiteral("submode")]   = static_cast<int>(submode);
+        m[QStringLiteral("submode")]   = f.submode;
         m_pendingTxFrames.append(m);
     }
     if (m_wsServer) m_wsServer->pushTxQueued(m_pendingTxFrames.size());
@@ -2265,6 +2476,71 @@ bool MainWindow::apiSetPtt(bool on)
         m_hamlib->setPtt(on);
     }, Qt::QueuedConnection);
     return true;
+}
+
+void MainWindow::apiSetModem(int type)
+{
+    // Reject unsupported types at compile time
+    if (type == 1) {
+#ifndef HAVE_CODEC2
+        return;
+#endif
+    } else if (type == 2) {
+#ifndef HAVE_OLIVIA
+        return;
+#endif
+    } else if (type == 3) {
+#ifndef HAVE_PSK_MODEM
+        return;
+#endif
+    } else if (type != 0) {
+        return;
+    }
+    if (type == m_config.modemType) return;
+
+    m_config.modemType = type;
+    // Reset to a sensible default submode for each modem
+    m_config.submode   = (type == 3) ? 1 : 0;  // PSK defaults to BPSK63 (idx 1)
+
+#ifdef HAVE_CODEC2
+    if (type == 1)
+        m_modem = std::make_unique<Codec2Modem>(0);
+    else
+#endif
+#ifdef HAVE_OLIVIA
+    if (type == 2)
+        m_modem = std::make_unique<OliviaModem>(0);
+    else
+#endif
+#ifdef HAVE_PSK_MODEM
+    if (type == 3)
+        m_modem = std::make_unique<PskModem>(m_config.submode);
+    else
+#endif
+        m_modem = std::make_unique<Gfsk8Modem>();
+
+    restartDecodeWorker();
+    refreshSubmodeCombo();
+
+    const bool streaming = (m_modem->submodeParms(0).periodSeconds == 0);
+    if (streaming) {
+        m_periodClock->stop();
+        disconnect(m_audioChunkConn);
+        m_audioChunkConn = connect(
+            m_audioIn, &AudioInput::audioChunkReady,
+            this, &MainWindow::onAudioChunkReady, Qt::QueuedConnection);
+        m_streamTxTimer->start();
+    } else {
+        m_streamTxTimer->stop();
+        disconnect(m_audioChunkConn);
+        m_periodClock->setPeriodSeconds(m_modem->submodeParms(0).periodSeconds);
+        m_periodClock->start();
+    }
+    stopAudio();
+    startAudio();
+
+    m_config.save();
+    if (m_wsServer) m_wsServer->pushConfigChanged();
 }
 
 void MainWindow::apiClearMessages()

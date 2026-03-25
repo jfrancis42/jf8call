@@ -17,11 +17,12 @@
 #include <QJsonArray>
 #include <QPlainTextEdit>
 #include <QHash>
+#include <memory>
 #include <vector>
 #include "config.h"
 #include "hamlibcontroller.h"
 #include "updatechecker.h"
-#include <gfsk8modem.h>
+#include "imodem.h"
 
 class MessageModel;
 class WaterfallWidget;
@@ -72,8 +73,9 @@ public:
 
     // Actions
     void apiQueueTx(const QString &text);
-    void apiQueueTxSubmode(const QString &text, gfsk8::Submode submode);
+    void apiQueueTxSubmode(const QString &text, int submode);
     void apiClearTxQueue();
+    void apiSetModem(int type);         // 0=Gfsk8, 1=Codec2
     void apiRestartAudio();
     void apiConnectRadio(const RigConfig &cfg);
     void apiDisconnectRadio();
@@ -89,6 +91,8 @@ private slots:
     // Audio / modem
     void onSpectrumReady(std::vector<float> magnitudes, float sampleRateHz);
     void onPeriodStarted(int utc);
+    void onAudioChunkReady(QByteArray chunk);  // streaming modem RX
+    void onStreamTxTimer();                    // streaming modem TX polling
     void onDecodeFinished(const QList<QVariantMap> &results);
     void onPlaybackFinished();
 
@@ -138,12 +142,17 @@ private:
     void startAudio();
     void stopAudio();
     void transmitMessage(const QString &text, const QString &gridOverride = QString());
-    void transmitFrames(const std::vector<gfsk8::TxFrame> &frames, gfsk8::Submode submode);
+    void transmitNextFrame();          // shared TX path for period-based and streaming
+    void refreshSubmodeCombo();        // repopulate m_submodeCbo from active modem
+    void restartDecodeWorker();        // recreate decode thread+worker for active modem type
     void setTransmitting(bool tx);
     RigConfig configToRigConfig() const;
     void rigConfigToConfig(const RigConfig &cfg);
 
     Config m_config;
+
+    // Active modem (JS8 by default; swappable for future modems)
+    std::unique_ptr<IModem> m_modem;
 
     // WebSocket API server
     WsServer *m_wsServer = nullptr;
@@ -164,8 +173,10 @@ private:
     bool         m_transmitting = false;
     bool         m_audioStarted = false;
 
-    // Period clock
+    // Period clock (used only for period-based modems)
     PeriodClock *m_periodClock;
+    QMetaObject::Connection m_audioChunkConn; // audioChunkReady → onAudioChunkReady
+    QTimer *m_streamTxTimer = nullptr;        // TX polling for streaming modems
 
     // Hamlib
     HamlibController *m_hamlib;

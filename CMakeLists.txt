@@ -120,6 +120,100 @@ if(NOT PORTAUDIO_FOUND)
     message(FATAL_ERROR "PortAudio not found. Install libportaudio-dev.\nFor Windows cross-compile: run build-windows-cross.sh --setup to build PortAudio.")
 endif()
 
+# ── Olivia modem (olivia-modem library) ──────────────────────────────────────
+# Location of the olivia-modem source tree.
+# Pass -DOLIVIA_MODEM_DIR=<path> or rely on the default ~/olivia-modem.
+if(NOT DEFINED OLIVIA_MODEM_DIR)
+    set(OLIVIA_MODEM_DIR "$ENV{HOME}/olivia-modem")
+endif()
+
+if(EXISTS "${OLIVIA_MODEM_DIR}/include/oliviamodem.h")
+    # Determine the pre-built library path, mirroring gfsk8modem pattern
+    if(DEFINED OLIVIA_MODEM_BUILD_DIR)
+        set(OLIVIA_MODEM_LIB "${OLIVIA_MODEM_BUILD_DIR}/liboliviamodem.a")
+    else()
+        set(OLIVIA_MODEM_LIB "${OLIVIA_MODEM_DIR}/build/liboliviamodem.a")
+        if(NOT EXISTS "${OLIVIA_MODEM_LIB}")
+            set(OLIVIA_MODEM_LIB "${OLIVIA_MODEM_DIR}/liboliviamodem.a")
+        endif()
+    endif()
+
+    if(EXISTS "${OLIVIA_MODEM_LIB}")
+        add_library(oliviamodem STATIC IMPORTED)
+        set_target_properties(oliviamodem PROPERTIES
+            IMPORTED_LOCATION "${OLIVIA_MODEM_LIB}")
+        target_include_directories(oliviamodem INTERFACE
+            "${OLIVIA_MODEM_DIR}/include")
+        set(OLIVIA_MODEM_FOUND TRUE)
+        message(STATUS "Olivia modem found — Olivia mode enabled")
+    else()
+        message(STATUS "Olivia modem: library not built yet — run cmake --build in ${OLIVIA_MODEM_DIR}. Olivia disabled.")
+    endif()
+else()
+    message(STATUS "Olivia modem not found at ${OLIVIA_MODEM_DIR} — Olivia disabled")
+endif()
+
+# ── libpsk (PSK31/63/FEC modem, optional) ────────────────────────────────────
+# Location of the libpsk source tree (~/.../psk31).
+# Pass -DPSK_MODEM_DIR=<path> or rely on the default ~/psk31.
+if(NOT DEFINED PSK_MODEM_DIR)
+    set(PSK_MODEM_DIR "$ENV{HOME}/psk31")
+endif()
+
+if(EXISTS "${PSK_MODEM_DIR}/include/psk.h")
+    if(DEFINED PSK_MODEM_BUILD_DIR)
+        set(PSK_MODEM_LIB "${PSK_MODEM_BUILD_DIR}/libpsk.a")
+    else()
+        set(PSK_MODEM_LIB "${PSK_MODEM_DIR}/build/libpsk.a")
+        if(NOT EXISTS "${PSK_MODEM_LIB}")
+            set(PSK_MODEM_LIB "${PSK_MODEM_DIR}/libpsk.a")
+        endif()
+    endif()
+
+    if(EXISTS "${PSK_MODEM_LIB}")
+        add_library(pskmodem STATIC IMPORTED)
+        set_target_properties(pskmodem PROPERTIES
+            IMPORTED_LOCATION "${PSK_MODEM_LIB}")
+        target_include_directories(pskmodem INTERFACE
+            "${PSK_MODEM_DIR}/include")
+        set(PSK_MODEM_FOUND TRUE)
+        message(STATUS "libpsk found — PSK modem enabled")
+    else()
+        message(STATUS "libpsk: library not built yet — run cmake --build in ${PSK_MODEM_DIR}. PSK disabled.")
+    endif()
+else()
+    message(STATUS "libpsk not found at ${PSK_MODEM_DIR} — PSK modem disabled")
+endif()
+
+# ── Codec2 / FreeDV (optional) ───────────────────────────────────────────────
+# Native Linux/RPi: link against system libcodec2 via pkg-config.
+# Windows cross-compile: pass -DCODEC2_DIR=<path-to-prebuilt> to point at a
+#   directory containing include/codec2/ headers and lib/libcodec2.a.
+if(DEFINED CODEC2_DIR)
+    find_library(CODEC2_LIB NAMES codec2
+        PATHS "${CODEC2_DIR}/lib" "${CODEC2_DIR}"
+        NO_DEFAULT_PATH)
+    find_path(CODEC2_INCLUDE_DIR NAMES codec2/freedv_api.h
+        PATHS "${CODEC2_DIR}/include"
+        NO_DEFAULT_PATH)
+    if(CODEC2_LIB AND CODEC2_INCLUDE_DIR)
+        set(CODEC2_FOUND TRUE)
+        set(CODEC2_LIBRARIES "${CODEC2_LIB}")
+        set(CODEC2_INCLUDE_DIRS "${CODEC2_INCLUDE_DIR}")
+    endif()
+elseif(PkgConfig_FOUND AND NOT CMAKE_CROSSCOMPILING)
+    pkg_check_modules(CODEC2 QUIET codec2)
+endif()
+if(NOT CODEC2_FOUND)
+    find_library(CODEC2_LIB NAMES codec2)
+    find_path(CODEC2_INCLUDE_DIR NAMES codec2/freedv_api.h)
+    if(CODEC2_LIB AND CODEC2_INCLUDE_DIR)
+        set(CODEC2_FOUND TRUE)
+        set(CODEC2_LIBRARIES "${CODEC2_LIB}")
+        set(CODEC2_INCLUDE_DIRS "${CODEC2_INCLUDE_DIR}")
+    endif()
+endif()
+
 # ── Hamlib (optional) ────────────────────────────────────────────────────────
 if(PkgConfig_FOUND AND NOT WIN32)
     pkg_check_modules(HAMLIB QUIET hamlib)
@@ -144,6 +238,7 @@ set(SOURCES
     src/gridcache.cpp
     src/messageinbox.cpp
     src/hamlibcontroller.cpp
+    src/gfsk8_modem.cpp
     src/js8message.cpp
     src/messagemodel.cpp
     src/waterfallwidget.cpp
@@ -155,6 +250,21 @@ set(SOURCES
     src/wsserver.cpp
     resources.qrc
 )
+
+if(CODEC2_FOUND)
+    list(APPEND SOURCES src/codec2_modem.cpp)
+    message(STATUS "Codec2 found — DATAC modem enabled")
+else()
+    message(STATUS "Codec2 not found — DATAC modem disabled (install libcodec2-dev to enable)")
+endif()
+
+if(OLIVIA_MODEM_FOUND)
+    list(APPEND SOURCES src/olivia_modem.cpp)
+endif()
+
+if(PSK_MODEM_FOUND)
+    list(APPEND SOURCES src/psk_modem.cpp)
+endif()
 
 set(HEADERS
     src/buildinfo.h
@@ -206,6 +316,26 @@ if(HAMLIB_FOUND)
     target_link_options(jf8call PRIVATE ${HAMLIB_LDFLAGS_OTHER})
 else()
     message(STATUS "Hamlib not found — radio control disabled")
+endif()
+
+if(CODEC2_FOUND)
+    target_compile_definitions(jf8call PRIVATE HAVE_CODEC2)
+    target_include_directories(jf8call PRIVATE ${CODEC2_INCLUDE_DIRS})
+    target_link_libraries(jf8call PRIVATE ${CODEC2_LIBRARIES})
+    if(CODEC2_LDFLAGS_OTHER)
+        target_link_options(jf8call PRIVATE ${CODEC2_LDFLAGS_OTHER})
+    endif()
+endif()
+
+if(OLIVIA_MODEM_FOUND)
+    target_compile_definitions(jf8call PRIVATE HAVE_OLIVIA)
+    target_link_libraries(jf8call PRIVATE oliviamodem m)
+endif()
+
+if(PSK_MODEM_FOUND)
+    target_compile_definitions(jf8call PRIVATE HAVE_PSK_MODEM)
+    target_include_directories(jf8call PRIVATE "${PSK_MODEM_DIR}/include")
+    target_link_libraries(jf8call PRIVATE pskmodem m)
 endif()
 
 # ── Build timestamp ───────────────────────────────────────────────────────────
