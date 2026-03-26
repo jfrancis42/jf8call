@@ -971,10 +971,12 @@ private:
         if (m_doneCalled) return;
         m_doneCalled = true;
         if (m_timer) m_timer->stop();
-        // Disconnect all m_ws→this signals before aborting to prevent
-        // Qt teardown warnings from the internal QTcpSocket being destroyed.
         disconnect(m_ws, nullptr, this, nullptr);
         m_ws->abort();
+        // Explicitly destroy the socket now, in a clean context, so Qt doesn't
+        // do it during app teardown and emit QTcpSocket wildcard-disconnect warnings.
+        delete m_ws;
+        m_ws = nullptr;
         QCoreApplication::exit(code);
     }
 

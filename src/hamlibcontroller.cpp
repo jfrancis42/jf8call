@@ -260,8 +260,10 @@ int HamlibController::getMute() const
 #ifdef HAVE_HAMLIB
     if (!m_rig || !m_connected.load()) return -1;
     int status = 0;
-    if (rig_get_func(m_rig, RIG_VFO_CURR, RIG_FUNC_MUTE, &status) != RIG_OK) return -1;
-    return status ? 1 : 0;
+    int ret = rig_get_func(m_rig, RIG_VFO_CURR, RIG_FUNC_MUTE, &status);
+    if (ret == RIG_OK) return status ? 1 : 0;
+    // Fallback: infer mute state from whether we have a saved pre-mute volume
+    return (m_preMuteVolume >= 0) ? 1 : 0;
 #else
     return -1;
 #endif
@@ -328,12 +330,35 @@ bool HamlibController::setMute(bool muted)
         return false;
     }
     int ret = rig_set_func(m_rig, RIG_VFO_CURR, RIG_FUNC_MUTE, muted ? 1 : 0);
-    if (ret != RIG_OK) {
-        m_lastError = QStringLiteral("Failed to %1 mute: %2")
-                      .arg(muted ? u"enable" : u"disable")
-                      .arg(QString::fromLatin1(rigerror(ret)));
-        emit error(m_lastError);
-        return false;
+    if (ret == RIG_OK) {
+        if (!muted) m_preMuteVolume = -1;
+        return true;
+    }
+    // RIG_FUNC_MUTE not supported — fall back to AF volume save/restore
+    if (muted) {
+        value_t vol{};
+        if (rig_get_level(m_rig, RIG_VFO_CURR, RIG_LEVEL_AF, &vol) != RIG_OK) {
+            m_lastError = QStringLiteral("Mute not supported and AF volume unavailable");
+            emit error(m_lastError);
+            return false;
+        }
+        m_preMuteVolume = qBound(0, static_cast<int>(std::round(vol.f * 100.0f)), 100);
+        vol.f = 0.0f;
+        if (rig_set_level(m_rig, RIG_VFO_CURR, RIG_LEVEL_AF, vol) != RIG_OK) {
+            m_lastError = QStringLiteral("Mute not supported and failed to set AF volume to 0");
+            emit error(m_lastError);
+            return false;
+        }
+    } else {
+        int restoreVol = (m_preMuteVolume >= 0) ? m_preMuteVolume : 50;
+        m_preMuteVolume = -1;
+        value_t vol{};
+        vol.f = static_cast<float>(restoreVol) / 100.0f;
+        if (rig_set_level(m_rig, RIG_VFO_CURR, RIG_LEVEL_AF, vol) != RIG_OK) {
+            m_lastError = QStringLiteral("Unmute not supported and failed to restore AF volume");
+            emit error(m_lastError);
+            return false;
+        }
     }
     return true;
 #else

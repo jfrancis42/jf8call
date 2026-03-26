@@ -66,6 +66,7 @@ private:
 #endif
     std::atomic<bool> m_connected{false};
     QString m_lastError;
+    int  m_preMuteVolume     = -1;   // saved AF vol for volume-based mute fallback
     int  m_pttType           = 0;
     int  m_consecutiveErrors = 0;
     static constexpr int k_maxConsecutiveErrors = 5;
