@@ -496,9 +496,57 @@ Sent every second. Same fields as `status.get` reply.
 }
 ```
 
+### `message.frame` — Partial GFSK8 frame received
+
+Sent for each individual GFSK8 frame of a multi-frame message as it arrives,
+**before** the complete message is assembled. Allows clients to display
+in-progress messages in real time and perform their own assembly.
+
+Not emitted for single-frame messages (those go directly to `message.decoded`),
+and not emitted for streaming modems (PSK, Olivia, Codec2) which already emit
+`message.decoded` for each decoded chunk.
+
+```json
+{
+  "type": "event",
+  "event": "message.frame",
+  "data": {
+    "time": "14:23:00",
+    "utc_iso": "2026-03-25T14:23:00Z",
+    "freq_hz": 1523.4,
+    "snr_db": -10,
+    "submode": 0,
+    "submode_name": "Normal",
+    "frame_type": 1,
+    "is_complete": false,
+    "frame_text": "W4ABC W5XYZ HE",
+    "assembled_text": "W4ABC W5XYZ HE"
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `time` | string | UTC time `HH:mm:ss` |
+| `utc_iso` | string | ISO 8601 UTC timestamp |
+| `freq_hz` | float | Audio frequency in Hz |
+| `snr_db` | int | SNR in dB |
+| `submode` | int | Submode index |
+| `submode_name` | string | Submode name |
+| `frame_type` | int | Frame position: 1=first, 0=middle |
+| `is_complete` | bool | Always `false` for this event |
+| `frame_text` | string | Raw text of just this frame |
+| `assembled_text` | string | All text accumulated so far (including this frame) |
+
+To correlate frames from the same transmission, group by `freq_hz` (rounded to the
+nearest 10 Hz). The final assembled message arrives as `message.decoded`.
+
+---
+
 ### `message.decoded` — New decoded JS8 message
 
-Sent whenever the decoder produces output.
+Sent whenever the decoder produces a complete message. For multi-frame GFSK8
+messages, fires once after the final frame is received and assembled.
 
 ```json
 {

@@ -247,6 +247,24 @@ void WsServer::pushMessageDecoded(const JS8Message &msg)
     broadcast(QStringLiteral("message.decoded"), d);
 }
 
+void WsServer::pushMessageFrame(float freqHz, int snrDb, int submode, int modemType,
+                                int frameType, const QString &frameText,
+                                const QString &assembledText, const QDateTime &utc)
+{
+    QJsonObject d;
+    d[QStringLiteral("time")]           = utc.toString(QStringLiteral("HH:mm:ss"));
+    d[QStringLiteral("utc_iso")]        = utc.toString(Qt::ISODate);
+    d[QStringLiteral("freq_hz")]        = static_cast<double>(freqHz);
+    d[QStringLiteral("snr_db")]         = snrDb;
+    d[QStringLiteral("submode")]        = submode;
+    d[QStringLiteral("submode_name")]   = submodeName(submode, modemType);
+    d[QStringLiteral("frame_type")]     = frameType;
+    d[QStringLiteral("is_complete")]    = false;
+    d[QStringLiteral("frame_text")]     = frameText;
+    d[QStringLiteral("assembled_text")] = assembledText;
+    broadcast(QStringLiteral("message.frame"), d);
+}
+
 void WsServer::pushSpectrum(const std::vector<float> &bins, float sampleRateHz)
 {
     m_latestBins  = bins;

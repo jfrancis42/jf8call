@@ -34,6 +34,10 @@ Examples:
   jf8-tool.py spectrum
   jf8-tool.py monitor              # stream all events until Ctrl-C
   jf8-tool.py monitor --filter message.decoded
+  jf8-tool.py stream                          # stream decoded messages to stdout
+  jf8-tool.py stream --frames                 # also show partial frame-by-frame updates
+  jf8-tool.py stream --json                   # raw JSON, one object per line
+  jf8-tool.py stream --output /tmp/rx.log     # write to file instead of stdout
 """
 
 import argparse
@@ -365,6 +369,60 @@ async def cmd_monitor(ws, args):
         pass
 
 
+async def cmd_stream(ws, args):
+    """Stream decoded messages (and optionally partial frames) to stdout or a file."""
+    import sys as _sys
+
+    outfile = open(args.output, "a") if args.output else _sys.stdout
+
+    def fmt_message(d, label="RX"):
+        frm  = d.get("from", "?")
+        to   = d.get("to", "")
+        body = d.get("body") or d.get("raw") or d.get("assembled_text", "")
+        snr  = d.get("snr_db", 0)
+        freq = d.get("freq_hz", 0)
+        t    = d.get("time", "")
+        dest = f" → {to}" if to else ""
+        return f"[{t}] +{freq:.0f}Hz  SNR{snr:+d}  {label}  {frm}{dest}  {body}"
+
+    def fmt_frame(d):
+        freq  = d.get("freq_hz", 0)
+        snr   = d.get("snr_db", 0)
+        t     = d.get("time", "")
+        ftype = d.get("frame_type", 0)
+        text  = d.get("assembled_text", "")
+        ftype_name = {0: "MID", 1: "FIRST", 2: "LAST", 3: "SINGLE"}.get(ftype, str(ftype))
+        return f"[{t}] +{freq:.0f}Hz  SNR{snr:+d}  [{ftype_name}]  {text}"
+
+    try:
+        async for raw in ws:
+            obj = json.loads(raw)
+            if obj.get("type") != "event":
+                continue
+            ev = obj.get("event", "")
+            data = obj.get("data", {})
+
+            line = None
+            if ev == "message.decoded":
+                if args.json:
+                    line = json.dumps(data)
+                else:
+                    line = fmt_message(data)
+            elif ev == "message.frame" and args.frames:
+                if args.json:
+                    line = json.dumps(data)
+                else:
+                    line = fmt_frame(data)
+
+            if line is not None:
+                print(line, file=outfile, flush=True)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        if args.output:
+            outfile.close()
+
+
 # ── Argument parsing ───────────────────────────────────────────────────────────
 
 def build_parser():
@@ -452,6 +510,15 @@ def build_parser():
     mon.add_argument("--filter", metavar="EVENT",
                      help="Only show events containing this string")
 
+    # stream
+    strm = sub.add_parser("stream", help="Stream decoded messages to stdout or a file")
+    strm.add_argument("--frames", action="store_true",
+                      help="Also emit partial frame-by-frame updates (message.frame events)")
+    strm.add_argument("--json", action="store_true",
+                      help="Output raw JSON (one object per line) instead of human-readable text")
+    strm.add_argument("--output", metavar="FILE",
+                      help="Write to FILE instead of stdout (appends if file exists)")
+
     return p
 
 
@@ -521,6 +588,8 @@ async def main():
                 await cmd_tx_clear(ws, args)
         elif cmd == "monitor":
             await cmd_monitor(ws, args)
+        elif cmd == "stream":
+            await cmd_stream(ws, args)
     finally:
         await ws.close()
 

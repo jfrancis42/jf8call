@@ -1189,6 +1189,11 @@ void MainWindow::onDecodeFinished(const QList<QVariantMap> &results)
                     m_heardFreqBlock[fKey] = blockIndex;
                 }
             }
+            if (m_wsServer)
+                m_wsServer->pushMessageFrame(freqHz, snrDb, submode, d.modemType,
+                                             d.frameType, effectiveRawText,
+                                             effectiveRawText,
+                                             QDateTime::currentDateTimeUtc());
             continue; // skip model/wsServer/auto-reply
         }
 
@@ -1196,6 +1201,8 @@ void MainWindow::onDecodeFinished(const QList<QVariantMap> &results)
             // Middle continuation frame: append to buffer.
             if (m_gfsk8FrameBuffers.contains(fKey))
                 m_gfsk8FrameBuffers[fKey].assembledRawText += effectiveRawText;
+            const QString assembled = m_gfsk8FrameBuffers.contains(fKey)
+                ? m_gfsk8FrameBuffers[fKey].assembledRawText : effectiveRawText;
             // Heard pane: append to existing line.
             if (m_infoPane) {
                 auto it2 = m_heardFreqBlock.find(fKey);
@@ -1208,6 +1215,11 @@ void MainWindow::onDecodeFinished(const QList<QVariantMap> &results)
                     }
                 }
             }
+            if (m_wsServer)
+                m_wsServer->pushMessageFrame(freqHz, snrDb, submode, d.modemType,
+                                             d.frameType, effectiveRawText,
+                                             assembled,
+                                             QDateTime::currentDateTimeUtc());
             continue; // skip model/wsServer/auto-reply
         }
 
