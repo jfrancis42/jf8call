@@ -350,7 +350,7 @@ bool HamlibController::setMute(bool muted)
             return false;
         }
     } else {
-        int restoreVol = (m_preMuteVolume >= 0) ? m_preMuteVolume : 50;
+        int restoreVol = (m_preMuteVolume >= 0) ? m_preMuteVolume : 20;
         m_preMuteVolume = -1;
         value_t vol{};
         vol.f = static_cast<float>(restoreVol) / 100.0f;
