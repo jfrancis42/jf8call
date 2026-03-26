@@ -65,6 +65,7 @@ Config Config::load()
     c.rigDtrState   = o.value(u"rigDtrState").toInt(0);
     c.rigRtsState   = o.value(u"rigRtsState").toInt(0);
     c.pttType       = o.value(u"pttType").toInt(0);
+    c.pskReporterEnabled        = o.value(u"pskReporterEnabled").toBool(true);
     c.wsEnabled                 = o.value(u"wsEnabled").toBool(true);
     c.wsPort                    = o.value(u"wsPort").toInt(2102);
     c.wsHost                    = o.value(u"wsHost").toString(QStringLiteral("127.0.0.1"));
@@ -110,6 +111,7 @@ void Config::save() const
     o[u"rigDtrState"]   = rigDtrState;
     o[u"rigRtsState"]   = rigRtsState;
     o[u"pttType"]       = pttType;
+    o[u"pskReporterEnabled"]       = pskReporterEnabled;
     o[u"wsEnabled"]                = wsEnabled;
     o[u"wsPort"]                   = wsPort;
     o[u"wsHost"]                   = wsHost;
