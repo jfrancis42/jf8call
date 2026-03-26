@@ -3,6 +3,7 @@
 #include "hamlibcontroller.h"
 #include <QDebug>
 #include <algorithm>
+#include <cmath>
 
 HamlibController::HamlibController(QObject *parent)
     : QObject(parent)
@@ -227,6 +228,110 @@ double HamlibController::getFrequency() const
     return static_cast<double>(freqHz) / 1.0e3;
 #else
     return 0.0;
+#endif
+}
+
+int HamlibController::getRfPower() const
+{
+#ifdef HAVE_HAMLIB
+    if (!m_rig || !m_connected.load()) return -1;
+    value_t val{};
+    if (rig_get_level(m_rig, RIG_VFO_CURR, RIG_LEVEL_RFPOWER, &val) != RIG_OK) return -1;
+    return qBound(0, static_cast<int>(std::round(val.f * 100.0f)), 100);
+#else
+    return -1;
+#endif
+}
+
+int HamlibController::getAfVolume() const
+{
+#ifdef HAVE_HAMLIB
+    if (!m_rig || !m_connected.load()) return -1;
+    value_t val{};
+    if (rig_get_level(m_rig, RIG_VFO_CURR, RIG_LEVEL_AF, &val) != RIG_OK) return -1;
+    return qBound(0, static_cast<int>(std::round(val.f * 100.0f)), 100);
+#else
+    return -1;
+#endif
+}
+
+int HamlibController::getMute() const
+{
+#ifdef HAVE_HAMLIB
+    if (!m_rig || !m_connected.load()) return -1;
+    int status = 0;
+    if (rig_get_func(m_rig, RIG_VFO_CURR, RIG_FUNC_MUTE, &status) != RIG_OK) return -1;
+    return status ? 1 : 0;
+#else
+    return -1;
+#endif
+}
+
+bool HamlibController::setRfPower(int pct)
+{
+#ifdef HAVE_HAMLIB
+    if (!m_rig || !m_connected.load()) {
+        emit error(QStringLiteral("Radio not connected"));
+        return false;
+    }
+    value_t val{};
+    val.f = static_cast<float>(qBound(0, pct, 100)) / 100.0f;
+    int ret = rig_set_level(m_rig, RIG_VFO_CURR, RIG_LEVEL_RFPOWER, val);
+    if (ret != RIG_OK) {
+        emit error(QStringLiteral("Failed to set RF power: %1")
+                   .arg(QString::fromLatin1(rigerror(ret))));
+        return false;
+    }
+    return true;
+#else
+    Q_UNUSED(pct)
+    emit error(QStringLiteral("Hamlib not available"));
+    return false;
+#endif
+}
+
+bool HamlibController::setAfVolume(int pct)
+{
+#ifdef HAVE_HAMLIB
+    if (!m_rig || !m_connected.load()) {
+        emit error(QStringLiteral("Radio not connected"));
+        return false;
+    }
+    value_t val{};
+    val.f = static_cast<float>(qBound(0, pct, 100)) / 100.0f;
+    int ret = rig_set_level(m_rig, RIG_VFO_CURR, RIG_LEVEL_AF, val);
+    if (ret != RIG_OK) {
+        emit error(QStringLiteral("Failed to set AF volume: %1")
+                   .arg(QString::fromLatin1(rigerror(ret))));
+        return false;
+    }
+    return true;
+#else
+    Q_UNUSED(pct)
+    emit error(QStringLiteral("Hamlib not available"));
+    return false;
+#endif
+}
+
+bool HamlibController::setMute(bool muted)
+{
+#ifdef HAVE_HAMLIB
+    if (!m_rig || !m_connected.load()) {
+        emit error(QStringLiteral("Radio not connected"));
+        return false;
+    }
+    int ret = rig_set_func(m_rig, RIG_VFO_CURR, RIG_FUNC_MUTE, muted ? 1 : 0);
+    if (ret != RIG_OK) {
+        emit error(QStringLiteral("Failed to %1 mute: %2")
+                   .arg(muted ? u"enable" : u"disable")
+                   .arg(QString::fromLatin1(rigerror(ret))));
+        return false;
+    }
+    return true;
+#else
+    Q_UNUSED(muted)
+    emit error(QStringLiteral("Hamlib not available"));
+    return false;
 #endif
 }
 

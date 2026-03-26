@@ -82,6 +82,12 @@ private:
     QJsonObject cmdRadioFreqSet(const QJsonObject &d);
     QJsonObject cmdRadioPttSet(const QJsonObject &d);
     QJsonObject cmdRadioTune(const QJsonObject &d);
+    QJsonObject cmdRadioPowerGet(const QJsonObject &d);
+    QJsonObject cmdRadioPowerSet(const QJsonObject &d);
+    QJsonObject cmdRadioVolumeGet(const QJsonObject &d);
+    QJsonObject cmdRadioVolumeSet(const QJsonObject &d);
+    QJsonObject cmdRadioMute(const QJsonObject &d);
+    QJsonObject cmdRadioUnmute(const QJsonObject &d);
     QJsonObject cmdMessagesGet(const QJsonObject &d);
     QJsonObject cmdMessagesClear(const QJsonObject &d);
     QJsonObject cmdSpectrumGet(const QJsonObject &d);

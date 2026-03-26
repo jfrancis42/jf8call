@@ -2742,6 +2742,60 @@ bool MainWindow::apiSetPtt(bool on)
     return true;
 }
 
+int MainWindow::apiGetRfPower() const
+{
+    int result = -1;
+    QMetaObject::invokeMethod(m_hamlib, [this, &result]() {
+        result = m_hamlib->getRfPower();
+    }, Qt::BlockingQueuedConnection);
+    return result;
+}
+
+bool MainWindow::apiSetRfPower(int pct)
+{
+    bool ok = false;
+    QMetaObject::invokeMethod(m_hamlib, [this, pct, &ok]() {
+        ok = m_hamlib->setRfPower(pct);
+    }, Qt::BlockingQueuedConnection);
+    return ok;
+}
+
+int MainWindow::apiGetAfVolume() const
+{
+    int result = -1;
+    QMetaObject::invokeMethod(m_hamlib, [this, &result]() {
+        result = m_hamlib->getAfVolume();
+    }, Qt::BlockingQueuedConnection);
+    return result;
+}
+
+bool MainWindow::apiSetAfVolume(int pct)
+{
+    bool ok = false;
+    QMetaObject::invokeMethod(m_hamlib, [this, pct, &ok]() {
+        ok = m_hamlib->setAfVolume(pct);
+    }, Qt::BlockingQueuedConnection);
+    return ok;
+}
+
+int MainWindow::apiGetMute() const
+{
+    int result = -1;
+    QMetaObject::invokeMethod(m_hamlib, [this, &result]() {
+        result = m_hamlib->getMute();
+    }, Qt::BlockingQueuedConnection);
+    return result;
+}
+
+bool MainWindow::apiSetMute(bool muted)
+{
+    bool ok = false;
+    QMetaObject::invokeMethod(m_hamlib, [this, muted, &ok]() {
+        ok = m_hamlib->setMute(muted);
+    }, Qt::BlockingQueuedConnection);
+    return ok;
+}
+
 void MainWindow::apiSetModem(int type)
 {
     // Reject unsupported types at compile time

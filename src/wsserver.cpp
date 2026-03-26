@@ -162,6 +162,12 @@ void WsServer::handleCommand(QWebSocket *client, const QJsonObject &msg)
         { QStringLiteral("radio.frequency.set"),  &WsServer::cmdRadioFreqSet    },
         { QStringLiteral("radio.ptt.set"),        &WsServer::cmdRadioPttSet     },
         { QStringLiteral("radio.tune"),           &WsServer::cmdRadioTune       },
+        { QStringLiteral("radio.power.get"),      &WsServer::cmdRadioPowerGet   },
+        { QStringLiteral("radio.power.set"),      &WsServer::cmdRadioPowerSet   },
+        { QStringLiteral("radio.volume.get"),     &WsServer::cmdRadioVolumeGet  },
+        { QStringLiteral("radio.volume.set"),     &WsServer::cmdRadioVolumeSet  },
+        { QStringLiteral("radio.mute"),           &WsServer::cmdRadioMute       },
+        { QStringLiteral("radio.unmute"),         &WsServer::cmdRadioUnmute     },
         { QStringLiteral("messages.get"),         &WsServer::cmdMessagesGet     },
         { QStringLiteral("messages.clear"),       &WsServer::cmdMessagesClear   },
         { QStringLiteral("spectrum.get"),         &WsServer::cmdSpectrumGet     },
@@ -562,6 +568,84 @@ QJsonObject WsServer::cmdRadioTune(const QJsonObject &)
         throw QStringLiteral("radio not connected");
     m_app->apiTuneRadio();
     return {};
+}
+
+QJsonObject WsServer::cmdRadioPowerGet(const QJsonObject &)
+{
+    if (!m_app->apiIsRadioConnected())
+        throw QStringLiteral("radio not connected");
+    int pct = m_app->apiGetRfPower();
+    if (pct < 0)
+        throw QStringLiteral("RF power level not supported by this rig");
+    QJsonObject r;
+    r[QStringLiteral("power_pct")] = pct;
+    return r;
+}
+
+QJsonObject WsServer::cmdRadioPowerSet(const QJsonObject &d)
+{
+    if (!m_app->apiIsRadioConnected())
+        throw QStringLiteral("radio not connected");
+    if (!d.contains(QStringLiteral("power_pct")))
+        throw QStringLiteral("power_pct required (0-100)");
+    int pct = d.value(QStringLiteral("power_pct")).toInt(-1);
+    if (pct < 0 || pct > 100)
+        throw QStringLiteral("power_pct must be 0-100");
+    if (!m_app->apiSetRfPower(pct))
+        throw QStringLiteral("Failed to set RF power");
+    QJsonObject r;
+    r[QStringLiteral("power_pct")] = pct;
+    return r;
+}
+
+QJsonObject WsServer::cmdRadioVolumeGet(const QJsonObject &)
+{
+    if (!m_app->apiIsRadioConnected())
+        throw QStringLiteral("radio not connected");
+    int vol = m_app->apiGetAfVolume();
+    if (vol < 0)
+        throw QStringLiteral("AF volume not supported by this rig");
+    QJsonObject r;
+    r[QStringLiteral("volume")] = vol;
+    return r;
+}
+
+QJsonObject WsServer::cmdRadioVolumeSet(const QJsonObject &d)
+{
+    if (!m_app->apiIsRadioConnected())
+        throw QStringLiteral("radio not connected");
+    if (!d.contains(QStringLiteral("volume")))
+        throw QStringLiteral("volume required (0-100)");
+    int vol = d.value(QStringLiteral("volume")).toInt(-1);
+    if (vol < 0 || vol > 100)
+        throw QStringLiteral("volume must be 0-100");
+    if (!m_app->apiSetAfVolume(vol))
+        throw QStringLiteral("Failed to set AF volume");
+    QJsonObject r;
+    r[QStringLiteral("volume")] = vol;
+    return r;
+}
+
+QJsonObject WsServer::cmdRadioMute(const QJsonObject &)
+{
+    if (!m_app->apiIsRadioConnected())
+        throw QStringLiteral("radio not connected");
+    if (!m_app->apiSetMute(true))
+        throw QStringLiteral("Failed to mute radio");
+    QJsonObject r;
+    r[QStringLiteral("muted")] = true;
+    return r;
+}
+
+QJsonObject WsServer::cmdRadioUnmute(const QJsonObject &)
+{
+    if (!m_app->apiIsRadioConnected())
+        throw QStringLiteral("radio not connected");
+    if (!m_app->apiSetMute(false))
+        throw QStringLiteral("Failed to unmute radio");
+    QJsonObject r;
+    r[QStringLiteral("muted")] = false;
+    return r;
 }
 
 QJsonObject WsServer::cmdMessagesGet(const QJsonObject &d)
