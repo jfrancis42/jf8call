@@ -61,6 +61,7 @@ EOF
 OUTPUT="$OUTPUT_JF8CALL" linuxdeploy \
     --appdir "$APPDIR" \
     --plugin qt \
+    --exclude-library 'libtinfo.so*' \
     --output appimage
 
 echo "=== Done: $OUTPUT_JF8CALL ==="
@@ -89,6 +90,7 @@ EOF
 OUTPUT="$OUTPUT_TOOL" linuxdeploy \
     --appdir "$APPDIR_TOOL" \
     --plugin qt \
+    --exclude-library 'libtinfo.so*' \
     --output appimage
 
 echo "=== Done: $OUTPUT_TOOL ==="
