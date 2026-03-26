@@ -99,6 +99,7 @@ Reply `data` — all persistent config fields:
 | `grid` | string | Maidenhead grid locator |
 | `audioInputName` | string | PortAudio input device name |
 | `audioOutputName` | string | PortAudio output device name |
+| `modemType` | int | Active modem (0=JS8/GFSK8, 1=Codec2, 2=Olivia, 3=PSK) |
 | `submode` | int | Active submode index |
 | `frequencyKhz` | float | Dial frequency in kHz |
 | `txFreqHz` | float | TX audio offset in Hz |
@@ -106,9 +107,21 @@ Reply `data` — all persistent config fields:
 | `heartbeatEnabled` | bool | Heartbeat enabled |
 | `heartbeatIntervalPeriods` | int | Heartbeat interval |
 | `autoReply` | bool | Auto-reply enabled |
+| `stationInfo` | string | Station info string (sent in @INFO? replies) |
+| `stationStatus` | string | Station status string (sent in @? replies) |
+| `cqMessage` | string | CQ message body |
+| `distMiles` | bool | Display distances in miles (false = km) |
+| `autoAtu` | bool | Auto-ATU enabled |
+| `pskReporterEnabled` | bool | Submit spots to PSKReporter |
 | `rigModel` | int | Hamlib rig model number |
 | `rigPort` | string | Hamlib port (e.g. `/dev/ttyUSB0`) |
 | `rigBaud` | int | Hamlib serial baud rate |
+| `rigDataBits` | int | Serial data bits (5/6/7/8) |
+| `rigStopBits` | int | Serial stop bits (1/2) |
+| `rigParity` | int | Serial parity (0=None, 1=Odd, 2=Even) |
+| `rigHandshake` | int | Serial handshake (0=None, 1=XONXOFF, 2=Hardware) |
+| `rigDtrState` | int | DTR line state (0=Off, 1=On, 2=Unset) |
+| `rigRtsState` | int | RTS line state (0=Off, 1=On, 2=Unset) |
 | `pttType` | int | PTT type (0=VOX, 1=CAT, 2=DTR, 3=RTS) |
 | `wsEnabled` | bool | WebSocket API enabled |
 | `wsPort` | int | WebSocket port |
@@ -117,6 +130,45 @@ Reply `data` — all persistent config fields:
 
 ### `config.set` — Update configuration
 
+All fields are optional — supply only the fields you want to change. Changes are saved to disk and a `config.changed` event is broadcast to all clients.
+
+Settable fields (use the same key names as `config.get`):
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `callsign` | string | |
+| `grid` | string | |
+| `audioInputName` | string | Audio restarted on change |
+| `audioOutputName` | string | Audio restarted on change |
+| `modemType` | int | 0=JS8/GFSK8, 1=Codec2, 2=Olivia, 3=PSK |
+| `submode` | int | Resets to modem default when modemType changes |
+| `frequencyKhz` | float | Dial frequency display only (no CAT) |
+| `txFreqHz` | float | |
+| `heartbeatEnabled` | bool | |
+| `heartbeatIntervalPeriods` | int | |
+| `autoReply` | bool | |
+| `stationInfo` | string | Returned in @INFO? replies |
+| `stationStatus` | string | Returned in @? replies |
+| `cqMessage` | string | |
+| `distMiles` | bool | |
+| `autoAtu` | bool | |
+| `pskReporterEnabled` | bool | |
+| `rigModel` | int | Hamlib model number |
+| `rigPort` | string | |
+| `rigBaud` | int | |
+| `rigDataBits` | int | |
+| `rigStopBits` | int | |
+| `rigParity` | int | 0=None, 1=Odd, 2=Even |
+| `rigHandshake` | int | 0=None, 1=XONXOFF, 2=Hardware |
+| `rigDtrState` | int | 0=Off, 1=On, 2=Unset |
+| `rigRtsState` | int | 0=Off, 1=On, 2=Unset |
+| `pttType` | int | 0=VOX, 1=CAT, 2=DTR, 3=RTS |
+
+PSK `submode` values: `0`=BPSK31, `1`=BPSK63 (default), `2`=BPSK125, `3`=PSK63F, `4`=PSK125R, `5`=PSK250R, `6`=PSK500R.
+
+Olivia `submode` values: `0`=8/500 (default), `1`=4/250, `2`=8/250, `3`=16/500, `4`=8/1000, `5`=16/1000, `6`=32/1000.
+
+Example:
 ```json
 {
   "type": "cmd",
@@ -124,26 +176,11 @@ Reply `data` — all persistent config fields:
   "data": {
     "callsign": "W5XYZ",
     "grid": "DM79AA",
-    "modemType": 0,
-    "submode": 0,
     "frequencyKhz": 14078.0,
-    "txFreqHz": 1500.0,
-    "heartbeatEnabled": true,
-    "heartbeatIntervalPeriods": 4,
-    "autoReply": true,
-    "audioInputName": "",
-    "audioOutputName": ""
+    "heartbeatEnabled": true
   }
 }
 ```
-
-All fields are optional. Only supplied fields are updated. Changes are saved to disk and a `config.changed` event is broadcast to all clients. Audio is restarted if the audio device name changes.
-
-`modemType` values: `0` = JS8/GFSK8, `1` = Codec2 DATAC, `2` = Olivia, `3` = PSK. Switching modem resets `submode` to the modem's default.
-
-PSK `submode` values: `0`=BPSK31, `1`=BPSK63 (default), `2`=BPSK125, `3`=PSK63F, `4`=PSK125R, `5`=PSK250R, `6`=PSK500R.
-
-Olivia `submode` values: `0`=8/500 (default), `1`=4/250, `2`=8/250, `3`=16/500, `4`=8/1000, `5`=16/1000, `6`=32/1000.
 
 ---
 
@@ -185,10 +222,16 @@ Reply `data`:
 | `connected` | bool | Rig connected |
 | `freq_khz` | float | Current VFO frequency in kHz |
 | `mode` | string | Current rig mode |
-| `model` | int | Hamlib model number |
+| `rig_model` | int | Hamlib model number |
 | `port` | string | Serial port |
 | `baud` | int | Baud rate |
-| `ptt_type` | int | PTT type |
+| `data_bits` | int | Serial data bits |
+| `stop_bits` | int | Serial stop bits |
+| `parity` | int | Serial parity |
+| `handshake` | int | Serial handshake |
+| `dtr_state` | int | DTR line state |
+| `rts_state` | int | RTS line state |
+| `ptt_type` | int | PTT type (0=VOX, 1=CAT, 2=DTR, 3=RTS) |
 
 ---
 
@@ -199,15 +242,15 @@ Reply `data`:
   "type": "cmd",
   "cmd": "radio.connect",
   "data": {
-    "model": 3073,
+    "rig_model": 3073,
     "port": "/dev/ttyUSB0",
     "baud": 9600,
-    "pttType": 1
+    "ptt_type": 1
   }
 }
 ```
 
-All fields optional; omitted fields use saved config. On success, a `radio.connected` event is broadcast.
+All fields optional; omitted fields use saved config. Field names match those returned by `radio.get`. On success, a `radio.connected` event is broadcast.
 
 ---
 
@@ -230,6 +273,25 @@ All fields optional; omitted fields use saved config. On success, a `radio.conne
 ```
 
 Requires a connected rig. Sends `freq_khz` to the radio via Hamlib and updates the dial frequency display.
+
+---
+
+### `radio.tune` — Trigger ATU tune cycle
+
+```json
+{ "type": "cmd", "cmd": "radio.tune" }
+```
+
+Sends `RIG_OP_TUNE` to the rig via Hamlib CAT, triggering the internal ATU tuning
+cycle without transmitting noise. Requires a connected rig. Returns an error if
+the rig is not connected.
+
+Not all rigs support `RIG_OP_TUNE` via CAT — consult the Hamlib rig capabilities
+for your model. For rigs that do not, key PTT briefly with `radio.ptt.set` instead.
+
+When `autoAtu` is enabled (see `config.set`), `radio.frequency.set` automatically
+calls `radio.tune` after successfully changing the VFO frequency — no manual call
+needed.
 
 ---
 
@@ -264,7 +326,9 @@ Reply `data`:
 | Field | Type | Description |
 |-------|------|-------------|
 | `messages` | array | Array of message objects (see below) |
-| `total` | int | Total messages in log |
+| `count` | int | Number of messages returned |
+| `offset` | int | Offset used |
+| `limit` | int | Limit used |
 
 Message object fields:
 
@@ -328,7 +392,6 @@ Reply `data`:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `frames` | int | Number of TX frames queued |
 | `queue_size` | int | Total frames now in queue |
 
 ---
@@ -346,7 +409,7 @@ Reply `data`:
 | `queue` | array | Array of frame objects |
 | `size` | int | Number of queued frames |
 
-Frame object: `{ "payload": "...", "frameType": 0, "submode": 0 }`
+Frame object: `{ "payload": "...", "frame_type": 0, "submode": 0 }`
 
 ---
 
@@ -522,6 +585,7 @@ Sent whenever any config field changes (via GUI or API).
   "data": {
     "callsign": "W5XYZ",
     "grid": "DM79AA",
+    "modem_type": 0,
     "submode": 0,
     "frequency_khz": 14078.0,
     "tx_freq_hz": 1500.0,

@@ -161,6 +161,7 @@ void WsServer::handleCommand(QWebSocket *client, const QJsonObject &msg)
         { QStringLiteral("radio.disconnect"),     &WsServer::cmdRadioDisconnect },
         { QStringLiteral("radio.frequency.set"),  &WsServer::cmdRadioFreqSet    },
         { QStringLiteral("radio.ptt.set"),        &WsServer::cmdRadioPttSet     },
+        { QStringLiteral("radio.tune"),           &WsServer::cmdRadioTune       },
         { QStringLiteral("messages.get"),         &WsServer::cmdMessagesGet     },
         { QStringLiteral("messages.clear"),       &WsServer::cmdMessagesClear   },
         { QStringLiteral("spectrum.get"),         &WsServer::cmdSpectrumGet     },
@@ -383,6 +384,7 @@ QJsonObject WsServer::cmdConfigGet(const QJsonObject &)
     d[QStringLiteral("rigDtrState")]  = c.rigDtrState;
     d[QStringLiteral("rigRtsState")]  = c.rigRtsState;
     d[QStringLiteral("pttType")]      = c.pttType;
+    d[QStringLiteral("pskReporterEnabled")]          = c.pskReporterEnabled;
     d[QStringLiteral("wsEnabled")]                  = c.wsEnabled;
     d[QStringLiteral("wsPort")]                     = c.wsPort;
     return d;
@@ -422,6 +424,8 @@ QJsonObject WsServer::cmdConfigSet(const QJsonObject &d)
         m_app->apiSetDistMiles(d[QStringLiteral("distMiles")].toBool());
     if (d.contains(QStringLiteral("autoAtu")))
         m_app->apiSetAutoAtu(d[QStringLiteral("autoAtu")].toBool());
+    if (d.contains(QStringLiteral("pskReporterEnabled")))
+        m_app->apiSetPskReporterEnabled(d[QStringLiteral("pskReporterEnabled")].toBool());
 
     // Rig config: update only fields present in the request
     const Config &cur = m_app->apiConfig();
@@ -532,6 +536,14 @@ QJsonObject WsServer::cmdRadioPttSet(const QJsonObject &d)
     QJsonObject r;
     r[QStringLiteral("ptt")] = on;
     return r;
+}
+
+QJsonObject WsServer::cmdRadioTune(const QJsonObject &)
+{
+    if (!m_app->apiIsRadioConnected())
+        throw QStringLiteral("radio not connected");
+    m_app->apiTuneRadio();
+    return {};
 }
 
 QJsonObject WsServer::cmdMessagesGet(const QJsonObject &d)
