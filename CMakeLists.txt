@@ -246,6 +246,7 @@ set(SOURCES
     src/audiooutput.cpp
     src/periodclock.cpp
     src/updatechecker.cpp
+    src/pskreporter.cpp
     src/mainwindow.cpp
     src/wsserver.cpp
     resources.qrc
@@ -280,6 +281,7 @@ set(HEADERS
     src/audiooutput.h
     src/periodclock.h
     src/updatechecker.h
+    src/pskreporter.h
     src/mainwindow.h
     src/wsserver.h
 )

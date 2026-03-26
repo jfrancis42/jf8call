@@ -49,6 +49,9 @@ struct Config {
     int     rigRtsState = 0;           // 0=unset 1=on 2=off
     int     pttType     = 0;           // 0=VOX/none 1=CAT 2=DTR 3=RTS
 
+    // PSK Reporter
+    bool    pskReporterEnabled = true;
+
     // WebSocket API
     bool    wsEnabled  = true;
     int     wsPort     = 2102;
