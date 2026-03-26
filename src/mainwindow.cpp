@@ -9,6 +9,7 @@
 #include "periodclock.h"
 #include "js8message.h"
 #include "DecodedText.h"
+#include "pskreporter.h"
 
 #include <QApplication>
 #include <QToolBar>
@@ -113,6 +114,8 @@ public slots:
                 m[QStringLiteral("freqHz")]    = d.frequencyHz;
                 m[QStringLiteral("submode")]   = d.submode;
                 m[QStringLiteral("frameType")] = d.frameType;
+                m[QStringLiteral("isSyncMark")] = d.isSyncMark;
+                m[QStringLiteral("isEom")]       = d.isEom;
                 results.append(m);
             });
         emit decodeFinished(results);
@@ -255,6 +258,21 @@ MainWindow::MainWindow(QWidget *parent)
         if (m_wsServer) m_wsServer->pushStatus();
     });
     m_wsStatusTimer->start();
+
+    // PSK Reporter
+    m_pskReporter = new PskReporter(this);
+
+    // Frame cleanup timer: checks for timed-out GFSK8 multi-frame buffers
+    m_frameCleanupTimer = new QTimer(this);
+    m_frameCleanupTimer->setInterval(15000); // check every 15 seconds
+    connect(m_frameCleanupTimer, &QTimer::timeout, this, &MainWindow::onFrameCleanupTimer);
+    m_frameCleanupTimer->start();
+
+    if (m_config.pskReporterEnabled) {
+        m_pskReporter->setLocalStation(m_config.callsign, m_config.grid,
+                                        QStringLiteral("JF8Call/%1").arg(
+                                            QString::fromLatin1(JF8CALL_VERSION_STR)));
+    }
 
     // Update checker — runs async; shows update bar if a newer build exists
     m_updateChecker = new UpdateChecker(this);
@@ -642,57 +660,58 @@ void MainWindow::setupCentralWidget()
     interLayout->addWidget(m_interactiveDisplay, 1);
 
     // Input row: quick buttons + text entry + send
+    // Order: CQ | HB | SNR? | INFO? | GRID? | STATUS? | HEARING? | Deselect | txEdit… | MSG | Send | HALT
     auto *txRow = new QHBoxLayout;
-    m_hbBtn = new QPushButton(tr("@HB"));
-    m_hbBtn->setObjectName(QStringLiteral("quickBtn"));
-    connect(m_hbBtn, &QPushButton::clicked, this, &MainWindow::onHbClicked);
-    txRow->addWidget(m_hbBtn);
     m_cqBtn = new QPushButton(tr("CQ"));
     m_cqBtn->setObjectName(QStringLiteral("cqBtn"));
     connect(m_cqBtn, &QPushButton::clicked, this, &MainWindow::onCqClicked);
     txRow->addWidget(m_cqBtn);
-    m_snrBtn = new QPushButton(tr("@SNR?"));
+    m_hbBtn = new QPushButton(tr("HB"));
+    m_hbBtn->setObjectName(QStringLiteral("quickBtn"));
+    connect(m_hbBtn, &QPushButton::clicked, this, &MainWindow::onHbClicked);
+    txRow->addWidget(m_hbBtn);
+    m_snrBtn = new QPushButton(tr("SNR?"));
     m_snrBtn->setObjectName(QStringLiteral("quickBtn"));
     connect(m_snrBtn, &QPushButton::clicked, this, &MainWindow::onSnrQueryClicked);
     txRow->addWidget(m_snrBtn);
-    m_infoBtn = new QPushButton(tr("@INFO?"));
+    m_infoBtn = new QPushButton(tr("INFO?"));
     m_infoBtn->setObjectName(QStringLiteral("quickBtn"));
     connect(m_infoBtn, &QPushButton::clicked, this, &MainWindow::onInfoQueryClicked);
     txRow->addWidget(m_infoBtn);
-    m_gridBtn = new QPushButton(tr("@GRID?"));
+    m_gridBtn = new QPushButton(tr("GRID?"));
     m_gridBtn->setObjectName(QStringLiteral("quickBtn"));
     connect(m_gridBtn, &QPushButton::clicked, this, &MainWindow::onGridQueryClicked);
     txRow->addWidget(m_gridBtn);
-    m_statusBtn = new QPushButton(tr("@STATUS?"));
+    m_statusBtn = new QPushButton(tr("STATUS?"));
     m_statusBtn->setObjectName(QStringLiteral("quickBtn"));
     connect(m_statusBtn, &QPushButton::clicked, this, &MainWindow::onStatusQueryClicked);
     txRow->addWidget(m_statusBtn);
-    m_hearingBtn = new QPushButton(tr("@HEARING?"));
+    m_hearingBtn = new QPushButton(tr("HEARING?"));
     m_hearingBtn->setObjectName(QStringLiteral("quickBtn"));
     connect(m_hearingBtn, &QPushButton::clicked, this, &MainWindow::onHearingQueryClicked);
     txRow->addWidget(m_hearingBtn);
-    m_haltBtn = new QPushButton(tr("HALT"));
-    m_haltBtn->setObjectName(QStringLiteral("haltBtn"));
-    connect(m_haltBtn, &QPushButton::clicked, this, &MainWindow::onHaltClicked);
-    txRow->addWidget(m_haltBtn);
     m_deselectBtn = new QPushButton(tr("Deselect"));
     m_deselectBtn->setObjectName(QStringLiteral("deselectBtn"));
     m_deselectBtn->setEnabled(false);
     connect(m_deselectBtn, &QPushButton::clicked, this, &MainWindow::onDeselectClicked);
     txRow->addWidget(m_deselectBtn);
+    m_txEdit = new QLineEdit;
+    m_txEdit->setPlaceholderText(tr("TX on offset Hz — Enter to send"));
+    connect(m_txEdit, &QLineEdit::returnPressed, this, &MainWindow::onSendClicked);
+    txRow->addWidget(m_txEdit, 1);
     m_msgBtn = new QPushButton(tr("MSG"));
     m_msgBtn->setObjectName(QStringLiteral("msgBtn"));
     m_msgBtn->setEnabled(false);
     connect(m_msgBtn, &QPushButton::clicked, this, &MainWindow::onMsgBtnClicked);
     txRow->addWidget(m_msgBtn);
-    m_txEdit = new QLineEdit;
-    m_txEdit->setPlaceholderText(tr("TX on offset Hz — Enter to send"));
-    connect(m_txEdit, &QLineEdit::returnPressed, this, &MainWindow::onSendClicked);
-    txRow->addWidget(m_txEdit, 1);
     m_sendBtn = new QPushButton(tr("Send"));
     m_sendBtn->setObjectName(QStringLiteral("sendBtn"));
     connect(m_sendBtn, &QPushButton::clicked, this, &MainWindow::onSendClicked);
     txRow->addWidget(m_sendBtn);
+    m_haltBtn = new QPushButton(tr("HALT"));
+    m_haltBtn->setObjectName(QStringLiteral("haltBtn"));
+    connect(m_haltBtn, &QPushButton::clicked, this, &MainWindow::onHaltClicked);
+    txRow->addWidget(m_haltBtn);
     interLayout->addLayout(txRow);
     vSplit->addWidget(interWidget);
 
@@ -1102,7 +1121,7 @@ void MainWindow::onDecodeFinished(const QList<QVariantMap> &results)
         m_recentDecodes.insert(msgKey, nowSec);
         const QString rawText   = m[QStringLiteral("rawText")].toString();
         const float   freqHz    = m[QStringLiteral("freqHz")].toFloat();
-        const int     snrDb     = m[QStringLiteral("snrDb")].toInt();
+        int           snrDb     = m[QStringLiteral("snrDb")].toInt();
         const int     submode   = m[QStringLiteral("submode")].toInt();
 
         ModemDecoded d;
@@ -1114,8 +1133,100 @@ void MainWindow::onDecodeFinished(const QList<QVariantMap> &results)
         d.modemType   = m[QStringLiteral("modemType")].toInt();
         d.isRawText   = m[QStringLiteral("isRawText")].toBool();
 
-        JS8Message msg = parseDecoded(d, rawText.isEmpty() ? QString::fromStdString(d.message) : rawText,
-                                      m_config.callsign);
+        // ── GFSK8 multi-frame assembly ────────────────────────────────────────
+        // isSyncMark / isEom: handle before normal message processing.
+        const bool isSyncMark = m[QStringLiteral("isSyncMark")].toBool();
+        const bool isEom      = m[QStringLiteral("isEom")].toBool();
+
+        if (isSyncMark) {
+            // Sync heartbeat: nothing to display, could track timing here.
+            continue;
+        }
+
+        // Determine frame position within a GFSK8 multi-frame message.
+        // (fKey is already computed above for dedup; reuse it here.)
+        const bool isGfsk8      = (d.modemType == 0);
+        const bool frameIsFirst = isGfsk8 && ((d.frameType & Varicode::JS8CallFirst) != 0);
+        const bool frameIsLast  = isGfsk8 && ((d.frameType & Varicode::JS8CallLast) != 0);
+        // FrameDirected (3) = First|Last = single-frame; no assembly needed.
+        const bool isSingleFrame = frameIsFirst && frameIsLast;
+
+        QString effectiveRawText = rawText.isEmpty()
+            ? QString::fromStdString(d.message) : rawText;
+
+        if (isGfsk8 && frameIsFirst && !frameIsLast) {
+            // First frame of a multi-frame message: start assembly buffer.
+            GfskFrameBuffer buf;
+            buf.assembledRawText = effectiveRawText;
+            buf.firstSeenSec     = nowSec;
+            buf.freqHz           = freqHz;
+            buf.snrDb            = snrDb;
+            buf.submode          = submode;
+            m_gfsk8FrameBuffers[fKey] = buf;
+            // Fall through to heard pane update only (no model/wsServer/auto-reply yet).
+            // Parse just enough to get display text for heard pane.
+            JS8Message partialMsg = parseDecoded(d, effectiveRawText, m_config.callsign);
+            // Heard pane update for partial frame (no EOM marker yet)
+            if (m_infoPane) {
+                const QString display = partialMsg.rawText.isEmpty()
+                    ? partialMsg.body : partialMsg.rawText;
+                const QString newText = partialMsg.grid.isEmpty()
+                    ? display : QStringLiteral("%1  {%2}").arg(display, partialMsg.grid);
+                auto it2 = m_heardFreqBlock.find(fKey);
+                if (it2 != m_heardFreqBlock.end()) {
+                    QTextBlock block = m_infoPane->document()->findBlockByNumber(it2.value());
+                    if (block.isValid()) {
+                        QTextCursor cur(block);
+                        cur.movePosition(QTextCursor::EndOfBlock);
+                        cur.insertText(QStringLiteral("  |  ") + newText);
+                    } else {
+                        it2 = m_heardFreqBlock.end();
+                    }
+                }
+                if (it2 == m_heardFreqBlock.end()) {
+                    const int blockIndex = m_infoPane->document()->blockCount();
+                    m_infoPane->appendPlainText(newText);
+                    m_heardFreqBlock[fKey] = blockIndex;
+                }
+            }
+            continue; // skip model/wsServer/auto-reply
+        }
+
+        if (isGfsk8 && !frameIsFirst && !frameIsLast) {
+            // Middle continuation frame: append to buffer.
+            if (m_gfsk8FrameBuffers.contains(fKey))
+                m_gfsk8FrameBuffers[fKey].assembledRawText += effectiveRawText;
+            // Heard pane: append to existing line.
+            if (m_infoPane) {
+                auto it2 = m_heardFreqBlock.find(fKey);
+                if (it2 != m_heardFreqBlock.end()) {
+                    QTextBlock block = m_infoPane->document()->findBlockByNumber(it2.value());
+                    if (block.isValid()) {
+                        QTextCursor cur(block);
+                        cur.movePosition(QTextCursor::EndOfBlock);
+                        cur.insertText(effectiveRawText);
+                    }
+                }
+            }
+            continue; // skip model/wsServer/auto-reply
+        }
+
+        if (isGfsk8 && !frameIsFirst && frameIsLast) {
+            // Last frame of multi-frame: assemble and process complete message.
+            if (m_gfsk8FrameBuffers.contains(fKey)) {
+                effectiveRawText = m_gfsk8FrameBuffers[fKey].assembledRawText + effectiveRawText;
+                // Restore first-frame SNR for the assembled message
+                snrDb = m_gfsk8FrameBuffers[fKey].snrDb;
+                d.snrDb = snrDb;
+                m_gfsk8FrameBuffers.remove(fKey);
+            }
+            d.frameType = Varicode::JS8CallLast;
+            // Fall through to full processing below.
+        }
+        // else: isSingleFrame (FrameDirected=3) or streaming modem — process immediately.
+
+        JS8Message msg = parseDecoded(d, effectiveRawText, m_config.callsign);
+        // ── END GFSK8 multi-frame assembly ────────────────────────────────────
 
         // Update / fill grid from persistent cache
         if (!msg.from.isEmpty()) {
@@ -1137,9 +1248,22 @@ void MainWindow::onDecodeFinished(const QList<QVariantMap> &results)
             calcDistBearing(m_config.grid, msg.grid, msg.distKm, msg.bearingDeg);
         }
 
-        m_model->addMessage(msg);
+        // Only add a new row when we know the sender — continuation frames
+        // (non-first frames of multi-frame transmissions) carry no callsign
+        // and create confusing anonymous rows in the table.
+        if (!msg.from.isEmpty())
+            m_model->addMessage(msg);
         if (m_wsServer)
             m_wsServer->pushMessageDecoded(msg);
+
+        // PSK Reporter: submit spot for every decode with a known callsign.
+        // Dial frequency (kHz) + audio offset (Hz) gives spot frequency in Hz.
+        if (m_config.pskReporterEnabled && m_pskReporter && !msg.from.isEmpty()) {
+            const quint64 spotFreqHz =
+                static_cast<quint64>(m_config.frequencyKhz * 1000.0 + msg.audioFreqHz);
+            m_pskReporter->addSpot(msg.from, msg.grid.isEmpty() ? msg.gridFromCache ? msg.grid : QString() : msg.grid,
+                                   spotFreqHz, snrDb, msg.utc);
+        }
 
         // Heard pane: group messages on the same frequency onto the same line.
         // Round to nearest 10 Hz as the grouping key.
@@ -1170,6 +1294,23 @@ void MainWindow::onDecodeFinished(const QList<QVariantMap> &results)
                     .arg(newText);
                 m_infoPane->appendPlainText(line);
                 m_heardFreqBlock[freqKey] = m_infoPane->document()->blockCount() - 1;
+            }
+        }
+
+        // Append EOM marker to the heard pane line when a message is complete.
+        const bool showEom = isEom
+            || (isGfsk8 && (frameIsLast || isSingleFrame));
+        if (showEom && m_infoPane) {
+            const int eomFreqKey = static_cast<int>(std::round(
+                (isGfsk8 ? freqHz : msg.audioFreqHz) / 10.0f));
+            auto eomIt = m_heardFreqBlock.find(eomFreqKey);
+            if (eomIt != m_heardFreqBlock.end()) {
+                QTextBlock block = m_infoPane->document()->findBlockByNumber(eomIt.value());
+                if (block.isValid()) {
+                    QTextCursor cur(block);
+                    cur.movePosition(QTextCursor::EndOfBlock);
+                    cur.insertText(QStringLiteral(" \u2666")); // ♦
+                }
             }
         }
 
@@ -1262,10 +1403,13 @@ void MainWindow::onDecodeFinished(const QList<QVariantMap> &results)
             }
         }
 
-        // Auto-ACK: acknowledge DirectedMessage and MsgCommand addressed to us.
-        if (msg.isAddressedToMe(m_config.callsign) && !msg.from.isEmpty()) {
-            if (msg.type == JS8Message::Type::DirectedMessage ||
-                msg.type == JS8Message::Type::MsgCommand) {
+        // Auto-ACK: only for complete MSG commands (last or only frame).
+        // Generic directed freetext is not auto-ACK'd per JS8 protocol.
+        // JS8CallLast (bit 1) is set on the final frame of a multi-frame message,
+        // and on FrameDirected (=3) which is a single-frame message.
+        const bool isLastFrame = (d.frameType & Varicode::JS8CallLast) != 0;
+        if (isLastFrame && msg.isAddressedToMe(m_config.callsign) && !msg.from.isEmpty()) {
+            if (msg.type == JS8Message::Type::MsgCommand) {
                 const QString ack = msg.from + QStringLiteral(" ") + m_config.callsign
                                    + QStringLiteral(": ACK");
                 transmitMessage(ack);
@@ -1507,58 +1651,62 @@ void MainWindow::onHbClicked()
 
 void MainWindow::onSnrQueryClicked()
 {
-    // Prompt for callsign or use TX edit text
-    const QString dest = m_txEdit->text().trimmed().toUpper();
+    const QString dest = !m_selectedCallsign.isEmpty() && m_selectedCallsign != QStringLiteral("@ALL")
+                         ? m_selectedCallsign
+                         : m_txEdit->text().trimmed().toUpper();
     if (dest.isEmpty()) {
-        statusBar()->showMessage(tr("Enter destination callsign in TX box first"), 3000);
+        statusBar()->showMessage(tr("Select a callsign or enter one in the TX box first"), 3000);
         return;
     }
-    transmitMessage(dest + QStringLiteral(" ") + m_config.callsign + QStringLiteral(": @SNR?"));
-    m_txEdit->clear();
+    transmitMessage(dest + QStringLiteral(" ") + m_config.callsign + QStringLiteral(": SNR?"));
 }
 
 void MainWindow::onInfoQueryClicked()
 {
-    const QString dest = m_txEdit->text().trimmed().toUpper();
+    const QString dest = !m_selectedCallsign.isEmpty() && m_selectedCallsign != QStringLiteral("@ALL")
+                         ? m_selectedCallsign
+                         : m_txEdit->text().trimmed().toUpper();
     if (dest.isEmpty()) {
-        statusBar()->showMessage(tr("Enter destination callsign in TX box first"), 3000);
+        statusBar()->showMessage(tr("Select a callsign or enter one in the TX box first"), 3000);
         return;
     }
-    transmitMessage(dest + QStringLiteral(" ") + m_config.callsign + QStringLiteral(": @INFO?"));
-    m_txEdit->clear();
+    transmitMessage(dest + QStringLiteral(" ") + m_config.callsign + QStringLiteral(": INFO?"));
 }
 
 void MainWindow::onGridQueryClicked()
 {
-    const QString dest = m_txEdit->text().trimmed().toUpper();
+    const QString dest = !m_selectedCallsign.isEmpty() && m_selectedCallsign != QStringLiteral("@ALL")
+                         ? m_selectedCallsign
+                         : m_txEdit->text().trimmed().toUpper();
     if (dest.isEmpty()) {
-        statusBar()->showMessage(tr("Enter destination callsign in TX box first"), 3000);
+        statusBar()->showMessage(tr("Select a callsign or enter one in the TX box first"), 3000);
         return;
     }
-    transmitMessage(dest + QStringLiteral(" ") + m_config.callsign + QStringLiteral(": @GRID?"));
-    m_txEdit->clear();
+    transmitMessage(dest + QStringLiteral(" ") + m_config.callsign + QStringLiteral(": GRID?"));
 }
 
 void MainWindow::onStatusQueryClicked()
 {
-    const QString dest = m_txEdit->text().trimmed().toUpper();
+    const QString dest = !m_selectedCallsign.isEmpty() && m_selectedCallsign != QStringLiteral("@ALL")
+                         ? m_selectedCallsign
+                         : m_txEdit->text().trimmed().toUpper();
     if (dest.isEmpty()) {
-        statusBar()->showMessage(tr("Enter destination callsign in TX box first"), 3000);
+        statusBar()->showMessage(tr("Select a callsign or enter one in the TX box first"), 3000);
         return;
     }
-    transmitMessage(dest + QStringLiteral(" ") + m_config.callsign + QStringLiteral(": @STATUS?"));
-    m_txEdit->clear();
+    transmitMessage(dest + QStringLiteral(" ") + m_config.callsign + QStringLiteral(": STATUS?"));
 }
 
 void MainWindow::onHearingQueryClicked()
 {
-    const QString dest = m_txEdit->text().trimmed().toUpper();
+    const QString dest = !m_selectedCallsign.isEmpty() && m_selectedCallsign != QStringLiteral("@ALL")
+                         ? m_selectedCallsign
+                         : m_txEdit->text().trimmed().toUpper();
     if (dest.isEmpty()) {
-        statusBar()->showMessage(tr("Enter destination callsign in TX box first"), 3000);
+        statusBar()->showMessage(tr("Select a callsign or enter one in the TX box first"), 3000);
         return;
     }
-    transmitMessage(dest + QStringLiteral(" ") + m_config.callsign + QStringLiteral(": @HEARING?"));
-    m_txEdit->clear();
+    transmitMessage(dest + QStringLiteral(" ") + m_config.callsign + QStringLiteral(": HEARING?"));
 }
 
 void MainWindow::onCqClicked()
@@ -1703,6 +1851,49 @@ void MainWindow::rigConfigToConfig(const RigConfig &cfg)
     m_config.rigDtrState = cfg.dtrState;
     m_config.rigRtsState = cfg.rtsState;
     m_config.pttType     = cfg.pttType;
+}
+
+void MainWindow::onFrameCleanupTimer()
+{
+    const qint64 nowSec = QDateTime::currentSecsSinceEpoch();
+    for (auto it = m_gfsk8FrameBuffers.begin(); it != m_gfsk8FrameBuffers.end(); ) {
+        const qint64 ageSec = nowSec - it.value().firstSeenSec;
+        if (ageSec > 90) {
+            // Discard: too old to be useful
+            it = m_gfsk8FrameBuffers.erase(it);
+        } else if (ageSec > 60) {
+            // Force-complete: process whatever was assembled so far
+            const GfskFrameBuffer &buf = it.value();
+            if (!buf.assembledRawText.isEmpty()) {
+                ModemDecoded d;
+                d.modemType   = 0;
+                d.isRawText   = false;
+                d.frequencyHz = buf.freqHz;
+                d.snrDb       = buf.snrDb;
+                d.submode     = buf.submode;
+                d.frameType   = Varicode::JS8CallLast; // force-complete
+                // Re-parse as assembled message
+                JS8Message msg = parseDecoded(d,
+                    buf.assembledRawText, m_config.callsign);
+                if (!msg.from.isEmpty()) m_model->addMessage(msg);
+                if (m_wsServer) m_wsServer->pushMessageDecoded(msg);
+                // Append timeout marker to heard pane
+                const int fKey = qRound(buf.freqHz / 10.0f);
+                auto hIt = m_heardFreqBlock.find(fKey);
+                if (hIt != m_heardFreqBlock.end()) {
+                    QTextBlock block = m_infoPane->document()->findBlockByNumber(hIt.value());
+                    if (block.isValid()) {
+                        QTextCursor cur(block);
+                        cur.movePosition(QTextCursor::EndOfBlock);
+                        cur.insertText(QStringLiteral(" \u2666?"));
+                    }
+                }
+            }
+            it = m_gfsk8FrameBuffers.erase(it);
+        } else {
+            ++it;
+        }
+    }
 }
 
 void MainWindow::onRadioSetup()
@@ -2142,6 +2333,24 @@ void MainWindow::onPreferences()
             wsGroup, [=](int) { showRestartNote(); });
 
     vbox->addWidget(wsGroup);
+
+    // ── Reporting ────────────────────────────────────────────────────────────
+    auto *reportGroup = new QGroupBox(tr("Reporting"), content);
+    auto *reportForm  = new QFormLayout(reportGroup);
+
+    auto *pskCheck = new QCheckBox(tr("Submit spots to PSK Reporter (pskreporter.info)"), reportGroup);
+    pskCheck->setChecked(m_config.pskReporterEnabled);
+    reportForm->addRow(QString(), pskCheck);
+
+    auto *pskNote = new QLabel(
+        tr("<i>Spots are batched and sent every ~2 minutes. "
+           "Requires callsign and grid to be set.</i>"),
+        reportGroup);
+    pskNote->setWordWrap(true);
+    pskNote->setStyleSheet(QStringLiteral("color: #c9a84c;"));
+    reportForm->addRow(pskNote);
+
+    vbox->addWidget(reportGroup);
     vbox->addStretch(1);
 
     auto *buttons = new QDialogButtonBox(
@@ -2189,6 +2398,7 @@ void MainWindow::onPreferences()
     m_config.wsEnabled                 = wsEnabledCheck->isChecked();
     m_config.wsHost                    = wsHostCombo->currentData().toString();
     m_config.wsPort                    = wsPortSpin->value();
+    m_config.pskReporterEnabled        = pskCheck->isChecked();
     m_config.save();
 
     // Update callsign/grid display label
@@ -2200,6 +2410,14 @@ void MainWindow::onPreferences()
 
     // Update distance unit in model
     m_model->setDistanceMiles(m_config.distMiles);
+
+    // Update PSK Reporter local station (callsign/grid may have changed)
+    if (m_pskReporter) {
+        if (m_config.pskReporterEnabled)
+            m_pskReporter->setLocalStation(m_config.callsign, m_config.grid,
+                                            QStringLiteral("JF8Call/%1").arg(
+                                                QString::fromLatin1(JF8CALL_VERSION_STR)));
+    }
 
     // Apply modem type change (also restarts audio)
     if (modemChanged) {
@@ -2288,6 +2506,10 @@ void MainWindow::apiSetCallsign(const QString &s)
     }
     m_config.save();
     if (m_wsServer) m_wsServer->pushConfigChanged();
+    if (m_config.pskReporterEnabled && m_pskReporter)
+        m_pskReporter->setLocalStation(m_config.callsign, m_config.grid,
+                                        QStringLiteral("JF8Call/%1").arg(
+                                            QString::fromLatin1(JF8CALL_VERSION_STR)));
 }
 
 void MainWindow::apiSetGrid(const QString &s)
@@ -2300,6 +2522,10 @@ void MainWindow::apiSetGrid(const QString &s)
     }
     m_config.save();
     if (m_wsServer) m_wsServer->pushConfigChanged();
+    if (m_config.pskReporterEnabled && m_pskReporter)
+        m_pskReporter->setLocalStation(m_config.callsign, m_config.grid,
+                                        QStringLiteral("JF8Call/%1").arg(
+                                            QString::fromLatin1(JF8CALL_VERSION_STR)));
 }
 
 void MainWindow::apiSetSubmode(int idx)
@@ -2385,6 +2611,15 @@ void MainWindow::apiSetAutoAtu(bool v)
     m_config.save();
 }
 
+void MainWindow::apiSetPskReporterEnabled(bool v)
+{
+    m_config.pskReporterEnabled = v;
+    m_config.save();
+    if (m_pskReporter && v)
+        m_pskReporter->setLocalStation(m_config.callsign, m_config.grid,
+            QStringLiteral("JF8Call/%1").arg(QString::fromLatin1(JF8CALL_VERSION_STR)));
+}
+
 void MainWindow::apiSetAudioInput(const QString &name)
 {
     m_config.audioInputName = name;
@@ -2466,8 +2701,18 @@ bool MainWindow::apiSetFrequency(double khz)
         m_config.frequencyKhz = khz;
         { QSignalBlocker b(m_freqSpin); m_freqSpin->setValue(khz); }
         m_config.save();
+        if (m_config.autoAtu)
+            QMetaObject::invokeMethod(m_hamlib, &HamlibController::startTune,
+                                      Qt::QueuedConnection);
     }
     return ok;
+}
+
+void MainWindow::apiTuneRadio()
+{
+    if (m_hamlib->isConnected())
+        QMetaObject::invokeMethod(m_hamlib, &HamlibController::startTune,
+                                  Qt::QueuedConnection);
 }
 
 bool MainWindow::apiSetPtt(bool on)
