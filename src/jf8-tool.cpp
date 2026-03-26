@@ -971,8 +971,9 @@ private:
         if (m_doneCalled) return;
         m_doneCalled = true;
         if (m_timer) m_timer->stop();
-        // Abort (not close) to avoid triggering Qt's internal close-handshake
-        // timer during app teardown, which produces spurious warnings.
+        // Disconnect all m_ws→this signals before aborting to prevent
+        // Qt teardown warnings from the internal QTcpSocket being destroyed.
+        disconnect(m_ws, nullptr, this, nullptr);
         m_ws->abort();
         QCoreApplication::exit(code);
     }

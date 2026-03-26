@@ -574,9 +574,10 @@ QJsonObject WsServer::cmdRadioPowerGet(const QJsonObject &)
 {
     if (!m_app->apiIsRadioConnected())
         throw QStringLiteral("radio not connected");
-    int pct = m_app->apiGetRfPower();
+    QString err;
+    int pct = m_app->apiGetRfPower(&err);
     if (pct < 0)
-        throw QStringLiteral("RF power level not supported by this rig");
+        throw (err.isEmpty() ? QStringLiteral("RF power level not supported by this rig") : err);
     QJsonObject r;
     r[QStringLiteral("power_pct")] = pct;
     return r;
@@ -591,8 +592,9 @@ QJsonObject WsServer::cmdRadioPowerSet(const QJsonObject &d)
     int pct = d.value(QStringLiteral("power_pct")).toInt(-1);
     if (pct < 0 || pct > 100)
         throw QStringLiteral("power_pct must be 0-100");
-    if (!m_app->apiSetRfPower(pct))
-        throw QStringLiteral("Failed to set RF power");
+    QString err;
+    if (!m_app->apiSetRfPower(pct, &err))
+        throw (err.isEmpty() ? QStringLiteral("Failed to set RF power") : err);
     QJsonObject r;
     r[QStringLiteral("power_pct")] = pct;
     return r;
@@ -602,9 +604,10 @@ QJsonObject WsServer::cmdRadioVolumeGet(const QJsonObject &)
 {
     if (!m_app->apiIsRadioConnected())
         throw QStringLiteral("radio not connected");
-    int vol = m_app->apiGetAfVolume();
+    QString err;
+    int vol = m_app->apiGetAfVolume(&err);
     if (vol < 0)
-        throw QStringLiteral("AF volume not supported by this rig");
+        throw (err.isEmpty() ? QStringLiteral("AF volume not supported by this rig") : err);
     QJsonObject r;
     r[QStringLiteral("volume")] = vol;
     return r;
@@ -619,8 +622,9 @@ QJsonObject WsServer::cmdRadioVolumeSet(const QJsonObject &d)
     int vol = d.value(QStringLiteral("volume")).toInt(-1);
     if (vol < 0 || vol > 100)
         throw QStringLiteral("volume must be 0-100");
-    if (!m_app->apiSetAfVolume(vol))
-        throw QStringLiteral("Failed to set AF volume");
+    QString err;
+    if (!m_app->apiSetAfVolume(vol, &err))
+        throw (err.isEmpty() ? QStringLiteral("Failed to set AF volume") : err);
     QJsonObject r;
     r[QStringLiteral("volume")] = vol;
     return r;
@@ -630,8 +634,9 @@ QJsonObject WsServer::cmdRadioMute(const QJsonObject &)
 {
     if (!m_app->apiIsRadioConnected())
         throw QStringLiteral("radio not connected");
-    if (!m_app->apiSetMute(true))
-        throw QStringLiteral("Failed to mute radio");
+    QString err;
+    if (!m_app->apiSetMute(true, &err))
+        throw (err.isEmpty() ? QStringLiteral("Failed to mute radio") : err);
     QJsonObject r;
     r[QStringLiteral("muted")] = true;
     return r;
@@ -641,8 +646,9 @@ QJsonObject WsServer::cmdRadioUnmute(const QJsonObject &)
 {
     if (!m_app->apiIsRadioConnected())
         throw QStringLiteral("radio not connected");
-    if (!m_app->apiSetMute(false))
-        throw QStringLiteral("Failed to unmute radio");
+    QString err;
+    if (!m_app->apiSetMute(false, &err))
+        throw (err.isEmpty() ? QStringLiteral("Failed to unmute radio") : err);
     QJsonObject r;
     r[QStringLiteral("muted")] = false;
     return r;
