@@ -8,18 +8,25 @@
 #include "jf8call_version.h"
 #include <QApplication>
 #include "mainwindow.h"
+#ifdef HAVE_NCURSES
+#include "tuiwindow.h"
+#endif
 
 int main(int argc, char *argv[])
 {
     bool headless = false;
+    bool tui      = false;
 
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--headless") == 0 ||
             std::strcmp(argv[i], "--no-gui")   == 0) {
             headless = true;
         } else if (std::strcmp(argv[i], "--text") == 0) {
-            // TUI not yet implemented — fall through to headless for now
+#ifdef HAVE_NCURSES
+            tui = true;
+#else
             headless = true;
+#endif
         } else if (std::strcmp(argv[i], "--version") == 0 ||
                    std::strcmp(argv[i], "-v")         == 0) {
             fprintf(stdout, "jf8call %s\n", JF8CALL_VERSION_STR);
@@ -31,6 +38,7 @@ int main(int argc, char *argv[])
                 "\n"
                 "Options:\n"
                 "  --headless, --no-gui   Run without GUI (WebSocket API + audio only)\n"
+                "  --text                 Run with terminal UI (ncurses)\n"
                 "  --version, -v          Print version and exit\n"
                 "  --help, -h             Print this help and exit\n"
                 "\n"
@@ -40,13 +48,14 @@ int main(int argc, char *argv[])
         }
     }
 
-    // --headless: use Qt offscreen platform so no display connection is needed.
+    // --headless / --text: use Qt offscreen platform so no display connection is needed.
     // The offscreen plugin ships with qt6-base (libqoffscreen.so) and renders
     // to memory — all QObject / QTimer / audio / WS logic works normally.
-    if (headless) {
+    if (headless || tui) {
         qputenv("QT_QPA_PLATFORM", "offscreen");
-        fprintf(stderr, "jf8call %s — headless mode, WebSocket API on configured port\n",
-                JF8CALL_VERSION_STR);
+        if (headless)
+            fprintf(stderr, "jf8call %s — headless mode, WebSocket API on configured port\n",
+                    JF8CALL_VERSION_STR);
     }
 
     QApplication app(argc, argv);
@@ -55,14 +64,22 @@ int main(int argc, char *argv[])
     app.setApplicationName(QStringLiteral("JF8Call"));
     app.setApplicationVersion(QStringLiteral(JF8CALL_VERSION_STR));
 
-    // In headless mode QApplication::quitOnLastWindowClosed must be false
+    // In headless/TUI mode QApplication::quitOnLastWindowClosed must be false
     // so the app doesn't exit when no window is shown.
-    if (headless)
+    if (headless || tui)
         app.setQuitOnLastWindowClosed(false);
 
     MainWindow w;
-    if (!headless)
+    if (!headless && !tui)
         w.show();
+
+#ifdef HAVE_NCURSES
+    TuiWindow *tui_win = nullptr;
+    if (tui) {
+        tui_win = new TuiWindow(&w);
+        tui_win->start();
+    }
+#endif
 
     return app.exec();
 }

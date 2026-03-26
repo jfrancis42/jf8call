@@ -214,6 +214,18 @@ if(NOT CODEC2_FOUND)
     endif()
 endif()
 
+# ── ncurses / TUI (optional, Linux only) ─────────────────────────────────────
+if(NOT WIN32)
+    find_library(NCURSES_LIB NAMES ncurses)
+    find_path(NCURSES_INCLUDE_DIR NAMES ncurses.h curses.h)
+    if(NCURSES_LIB)
+        set(NCURSES_FOUND TRUE)
+        message(STATUS "ncurses found — TUI (--text) enabled")
+    else()
+        message(STATUS "ncurses not found — TUI (--text) disabled")
+    endif()
+endif()
+
 # ── Hamlib (optional) ────────────────────────────────────────────────────────
 if(PkgConfig_FOUND AND NOT WIN32)
     pkg_check_modules(HAMLIB QUIET hamlib)
@@ -267,6 +279,10 @@ if(PSK_MODEM_FOUND)
     list(APPEND SOURCES src/psk_modem.cpp)
 endif()
 
+if(NCURSES_FOUND)
+    list(APPEND SOURCES src/tuiwindow.cpp)
+endif()
+
 set(HEADERS
     src/buildinfo.h
     src/config.h
@@ -285,6 +301,10 @@ set(HEADERS
     src/mainwindow.h
     src/wsserver.h
 )
+
+if(NCURSES_FOUND)
+    list(APPEND HEADERS src/tuiwindow.h)
+endif()
 
 if(WIN32)
     add_executable(jf8call WIN32 ${SOURCES} ${HEADERS})
@@ -338,6 +358,14 @@ if(PSK_MODEM_FOUND)
     target_compile_definitions(jf8call PRIVATE HAVE_PSK_MODEM)
     target_include_directories(jf8call PRIVATE "${PSK_MODEM_DIR}/include")
     target_link_libraries(jf8call PRIVATE pskmodem m)
+endif()
+
+if(NCURSES_FOUND)
+    target_compile_definitions(jf8call PRIVATE HAVE_NCURSES)
+    if(NCURSES_INCLUDE_DIR)
+        target_include_directories(jf8call PRIVATE "${NCURSES_INCLUDE_DIR}")
+    endif()
+    target_link_libraries(jf8call PRIVATE "${NCURSES_LIB}")
 endif()
 
 # ── Build timestamp ───────────────────────────────────────────────────────────
