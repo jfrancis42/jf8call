@@ -386,8 +386,6 @@ public:
                 this, &Jf8Tool::onSocketError);
     }
 
-signals:
-    void finished(int exitCode);
 
 public slots:
     void start()
@@ -906,10 +904,11 @@ private:
     {
         if (m_doneCalled) return;
         m_doneCalled = true;
-        m_exitCode   = code;
         if (m_timer) m_timer->stop();
-        m_ws->close();
-        QTimer::singleShot(0, this, [this]() { emit finished(m_exitCode); });
+        // Abort (not close) to avoid triggering Qt's internal close-handshake
+        // timer during app teardown, which produces spurious warnings.
+        m_ws->abort();
+        QCoreApplication::exit(code);
     }
 
     // ── Members ───────────────────────────────────────────────────────────────
@@ -947,10 +946,6 @@ int main(int argc, char *argv[])
     signal(SIGTERM, sigHandler);
 
     auto *tool = new Jf8Tool(std::move(args), &app);
-    QObject::connect(tool, &Jf8Tool::finished,
-                     &app, &QCoreApplication::exit,
-                     Qt::QueuedConnection);
-
     QTimer::singleShot(0, tool, &Jf8Tool::start);
     return app.exec();
 }
