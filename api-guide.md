@@ -170,6 +170,7 @@ These go before the command name:
 | `tx queue` | Show TX queue contents |
 | `tx clear` | Clear TX queue |
 | `monitor [--filter EVENT]` | Stream live events (Ctrl-C to stop) |
+| `stream [--frames] [--json] [--output FILE]` | Stream decoded messages to stdout or file |
 
 ### Examples
 
@@ -708,10 +709,28 @@ Full status snapshot. Same fields as `status.get` reply. Use this for
 polling-style clients; event-driven clients can ignore it and rely on specific
 change events.
 
+### `message.frame`
+
+Emitted for each individual GFSK8 frame of a **multi-frame** message as it
+arrives, before assembly is complete. Allows clients to show in-progress messages
+in real time.
+
+Not emitted for single-frame messages (those go straight to `message.decoded`).
+Not emitted for streaming modems — PSK/Olivia/Codec2 already emit `message.decoded`
+for each decoded chunk as it arrives.
+
+Key fields: `freq_hz`, `snr_db`, `submode`, `frame_type` (1=first, 0=middle),
+`frame_text` (this frame only), `assembled_text` (cumulative text so far),
+`is_complete` (always false).
+
+Group frames from the same transmission by `round(freq_hz / 10)`.
+The assembled result arrives as `message.decoded`.
+
 ### `message.decoded`
 
-Emitted when the decoder produces a complete message. For JS8/GFSK8, this fires
-once the last frame of a multi-frame sequence is received and assembled.
+Emitted when the decoder produces a complete message. For multi-frame GFSK8
+messages, fires once after the final frame is received and assembled. For
+streaming modems, fires for each decoded text chunk.
 
 ```json
 {

@@ -43,6 +43,9 @@ public:
     // Called by MainWindow at the appropriate points in the application.
 
     void pushMessageDecoded(const JS8Message &msg);
+    void pushMessageFrame(float freqHz, int snrDb, int submode, int modemType,
+                          int frameType, const QString &frameText,
+                          const QString &assembledText, const QDateTime &utc);
     void pushSpectrum(const std::vector<float> &bins, float sampleRateHz);
     void pushStatus();
     void pushTxStarted();
