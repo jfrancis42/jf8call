@@ -213,6 +213,7 @@ echo "=== Deploying DLLs ==="
 DEPLOY_DIR="$BUILD_DIR/deploy"
 mkdir -p "$DEPLOY_DIR"
 cp "$BUILD_DIR/jf8call.exe" "$DEPLOY_DIR/"
+cp "$BUILD_DIR/jf8-tool.exe" "$DEPLOY_DIR/"
 
 # Copy Qt DLLs
 QT_BIN="$QT_WIN_DIR/bin"

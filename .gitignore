@@ -3,6 +3,7 @@ build/
 build-windows/
 build-rpi/
 AppDir/
+AppDir-tool/
 
 # Compiled binaries and archives
 *.a
@@ -14,6 +15,8 @@ AppDir/
 *.AppImage
 *.zip
 JF8Call-*
+jf8-tool-*-aarch64
+jf8-tool-*-x86_64.AppImage
 
 # Qt auto-generated
 *.moc
