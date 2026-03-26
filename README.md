@@ -4,6 +4,8 @@ A clean-room, JS8Call-compatible station application for Linux, Windows, and Ras
 
 JF8Call implements the JS8 digital radio protocol — a weak-signal HF keyboard-to-keyboard mode — with a strict separation between the modem back-end and user interface, and a pluggable modem architecture that supports JS8, Olivia MFSK, PSK31/63/FEC, and Codec2 FreeDV alongside the native JS8 mode. The name follows the same convention as JS8Call itself: JS8Call was named after Jordan Sherer's initials (JS), and JF8Call is named after the initials of its author, Jeff Francis (JF), N0GQ.
 
+**Design goal:** One of JF8Call's explicit design goals is to make it easy to integrate into larger, more complex communications tools and projects as the HF connectivity layer — and to stay out of the way while doing so. The WebSocket API, headless operation, and strict GUI/API parity are direct expressions of this goal. JF8Call is meant to be embedded in automated networks, custom station software, and digital infrastructure projects. It should be easy to drive programmatically, easy to run without a display, and silent when you don't need it.
+
 **Status: Early Alpha.** The application works and is actively used, but APIs and behavior may change without notice. Feedback and bug reports are welcome.
 
 ---
@@ -108,8 +110,24 @@ aarch64 automatically. Codec2 is not included (no arm64 system package available
 
 JF8Call exposes a full WebSocket API on `ws://localhost:2102` that provides
 complete parity with the GUI. Every operation available in the GUI — including
-modem selection and submode changes — can also be performed via the API. See
+modem selection and submode changes — can also be performed via the API. Push
+events notify connected clients of every state change in real time: received
+messages, spectrum data, TX status, radio connection changes, and configuration
+updates.
+
+This is not a convenience feature. It is the primary integration surface. JF8Call
+is designed to be used as the HF connectivity layer inside larger systems, and the
+WebSocket API is how those systems talk to it. See
 [websocket-api.md](websocket-api.md) for the full reference.
+
+Two ready-made tools are available for working with the API:
+
+- **[jf8-tool](jf8-tool.py)** — a command-line tool included in this repository
+  for interacting with JF8Call from the shell: query status, send messages, stream
+  received traffic, tune the radio, and more.
+- **[jf8net](https://github.com/jfrancis42/jf8net)** — a Python library that
+  provides a full async (and sync) client for the JF8Call WebSocket API, with typed
+  dataclasses, event callbacks, and complete coverage of all API endpoints.
 
 ---
 
