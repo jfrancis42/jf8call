@@ -25,7 +25,17 @@ struct ModemDecoded {
     int         utc         = 0;
     int         modemType   = 0;   ///< 0=Gfsk8/JS8, 1=Codec2
     bool        isRawText   = false; ///< true when message is already human-readable (skip JS8 DecodedText)
+    bool        isSyncMark  = false; ///< true = periodic sync heartbeat (strip from display)
+    bool        isEom       = false; ///< true = end-of-message marker
 };
+
+// Markers embedded in streaming modem payloads (PSK, Olivia) and Codec2 frames.
+// kStreamSyncChar is injected periodically; kStreamEomChar terminates each message.
+// Receivers detect and strip these, using them for timing and EOM display.
+static constexpr char kStreamSyncChar      = '\x05'; ///< ENQ — periodic sync heartbeat
+static constexpr char kStreamEomChar       = '\x04'; ///< EOT — end of message
+static constexpr int  kStreamSyncInterval  = 64;     ///< inject sync every N chars (PSK/Olivia)
+static constexpr int  kCodec2SyncInterval  = 4;      ///< inject sync every N data frames (Codec2)
 
 using ModemDecodeCallback = std::function<void(ModemDecoded const &)>;
 

@@ -49,8 +49,22 @@ std::vector<ModemTxFrame> PskModem::pack(
     int submode) const
 {
     const int sm = std::clamp(submode, 0, kPskSubmodeCount - 1);
+    const std::string fullText = mycall + ": " + text;
+
+    // Inject sync heartbeats every kStreamSyncInterval characters and
+    // append an EOM marker at the end so the receiver can detect message
+    // boundaries and transmission pace.
+    std::string payload;
+    payload.reserve(fullText.size() + fullText.size() / kStreamSyncInterval + 2);
+    for (size_t i = 0; i < fullText.size(); ++i) {
+        if (i > 0 && (i % static_cast<size_t>(kStreamSyncInterval)) == 0)
+            payload.push_back(kStreamSyncChar);
+        payload.push_back(fullText[i]);
+    }
+    payload.push_back(kStreamEomChar);
+
     ModemTxFrame f;
-    f.payload   = mycall + ": " + text;
+    f.payload   = std::move(payload);
     f.frameType = 0;
     f.submode   = sm;
     return { f };
@@ -84,9 +98,31 @@ std::vector<float> PskModem::modulate(
 void PskModem::charCb(char c, void *ud)
 {
     auto *ctx = static_cast<RxCallCtx *>(ud);
-    ctx->self->m_rxBuf.push_back(c);
-    if (c == '\n' || static_cast<int>(ctx->self->m_rxBuf.size()) >= kFlushLen)
-        ctx->self->emitMessage(*ctx->cb);
+    PskModem *self = ctx->self;
+
+    if (c == kStreamSyncChar) {
+        // Sync heartbeat: emit a sync event (no display text) so the receiver
+        // can track transmission pace and detect gaps.
+        ModemDecoded d;
+        d.isSyncMark  = true;
+        d.frequencyHz = self->m_lastFreqHz;
+        d.snrDb       = static_cast<int>(self->m_lastSnrDb);
+        d.modemType   = kPskModemType;
+        d.submode     = self->m_submodeIdx;
+        d.isRawText   = true;
+        (*ctx->cb)(d);
+        return;
+    }
+
+    if (c == kStreamEomChar) {
+        // End-of-message: flush accumulated text with EOM flag.
+        self->emitMessage(*ctx->cb, /*eom=*/true);
+        return;
+    }
+
+    self->m_rxBuf.push_back(c);
+    if (c == '\n' || static_cast<int>(self->m_rxBuf.size()) >= kFlushLen)
+        self->emitMessage(*ctx->cb, /*eom=*/false);
 }
 
 void PskModem::statusCb(float snrDb, float freqOffHz, void *ud)
@@ -115,14 +151,13 @@ void PskModem::feedAudio(
     psk_rx_feed(m_rx, buf.data(), buf.size());
 }
 
-void PskModem::emitMessage(const ModemDecodeCallback &cb, bool force)
+void PskModem::emitMessage(const ModemDecodeCallback &cb, bool eom)
 {
     // Strip trailing nulls / carriage returns common in PSK idle
     while (!m_rxBuf.empty() &&
            (m_rxBuf.back() == '\0' || m_rxBuf.back() == '\r'))
         m_rxBuf.pop_back();
 
-    if (m_rxBuf.empty() && !force) return;
     if (m_rxBuf.empty()) return;
 
     ModemDecoded d;
@@ -131,8 +166,9 @@ void PskModem::emitMessage(const ModemDecodeCallback &cb, bool force)
     d.frequencyHz = m_lastFreqHz;
     d.submode     = m_submodeIdx;
     d.modemType   = kPskModemType;
-    d.isRawText   = true;   // skip JS8 DecodedText parsing
+    d.isRawText   = true;
     d.frameType   = 0;
+    d.isEom       = eom;
 
     cb(d);
     m_rxBuf.clear();
