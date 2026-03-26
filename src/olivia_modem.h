@@ -80,6 +80,6 @@ private:
     float       m_lastSnr = 0.0f;
     float       m_lastFreqHz = 1500.0f;
 
-    void emitMessage(const ModemDecodeCallback &cb, bool force = false);
+    void emitMessage(const ModemDecodeCallback &cb, bool eom = false);
     OliviaLib *makeLib(int submodeIdx) const;
 };

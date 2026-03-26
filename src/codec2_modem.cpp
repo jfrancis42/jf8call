@@ -30,6 +30,8 @@ static const double kDatacBw[3] = { 500.0, 1600.0, 2400.0 };
 // Bytes (totalBytes-2)..(totalBytes-1): CRC-16/KERMIT computed over bytes 0..(totalBytes-3)
 
 static constexpr uint8_t kFlagText = 0x01;
+static constexpr uint8_t kFlagSync = 0x02; ///< sync heartbeat frame (empty payload)
+static constexpr uint8_t kFlagEom  = 0x04; ///< end-of-message frame (empty payload)
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -45,6 +47,23 @@ struct freedv *Codec2Modem::openMode(int idx) const
     if (fdv)
         freedv_set_frames_per_burst(fdv, 1);
     return fdv;
+}
+
+static ModemTxFrame makeEmptyFrame(int totalBytes, uint8_t flag, int submode)
+{
+    std::vector<uint8_t> bytes(static_cast<size_t>(totalBytes), 0u);
+    bytes[0] = flag;
+    // CRC over payload region (everything except last 2 bytes)
+    int payloadBytes = totalBytes - 2;
+    uint16_t crc = freedv_gen_crc16(bytes.data(), payloadBytes);
+    bytes[static_cast<size_t>(payloadBytes)]     = static_cast<uint8_t>(crc >> 8);
+    bytes[static_cast<size_t>(payloadBytes) + 1] = static_cast<uint8_t>(crc & 0xff);
+    ModemTxFrame f;
+    f.payload   = std::string(reinterpret_cast<const char *>(bytes.data()),
+                               static_cast<size_t>(totalBytes));
+    f.frameType = 0;
+    f.submode   = submode;
+    return f;
 }
 
 // ── Construction / destruction ────────────────────────────────────────────────
@@ -109,6 +128,7 @@ std::vector<ModemTxFrame> Codec2Modem::pack(
 
     std::vector<ModemTxFrame> out;
     size_t offset = 0;
+    int dataFrameCount = 0;
 
     do {
         std::string chunk = fullMsg.substr(offset, static_cast<size_t>(textPerFrame));
@@ -117,9 +137,7 @@ std::vector<ModemTxFrame> Codec2Modem::pack(
         std::vector<uint8_t> bytesIn(static_cast<size_t>(totalBytes), 0u);
         bytesIn[0] = kFlagText;
         std::memcpy(&bytesIn[1], chunk.data(), chunk.size());
-        // remaining bytes stay zero (null padding)
 
-        // Compute and append CRC over the payload region (exclude last 2 bytes)
         uint16_t crc = freedv_gen_crc16(bytesIn.data(), payloadBytes);
         bytesIn[static_cast<size_t>(payloadBytes)]     = static_cast<uint8_t>(crc >> 8);
         bytesIn[static_cast<size_t>(payloadBytes) + 1] = static_cast<uint8_t>(crc & 0xff);
@@ -130,8 +148,16 @@ std::vector<ModemTxFrame> Codec2Modem::pack(
         f.frameType = 0;
         f.submode   = submode;
         out.push_back(std::move(f));
+        ++dataFrameCount;
+
+        // Inject a sync frame every kCodec2SyncInterval data frames.
+        if (dataFrameCount % kCodec2SyncInterval == 0)
+            out.push_back(makeEmptyFrame(totalBytes, kFlagSync, submode));
 
     } while (offset < fullMsg.size());
+
+    // Append EOM frame after all data (and any trailing sync) frames.
+    out.push_back(makeEmptyFrame(totalBytes, kFlagEom, submode));
 
     return out;
 }
@@ -217,8 +243,32 @@ void Codec2Modem::feedAudio(
         uint16_t calcCrc = freedv_gen_crc16(bytesOut.data(), payloadBytes);
         if (rxCrc != calcCrc) continue;
 
-        // Check flags
-        if (bytesOut[0] != kFlagText) continue;
+        // Dispatch on frame type flag.
+        const uint8_t flag = bytesOut[0];
+
+        if (flag == kFlagSync) {
+            // Sync heartbeat frame: notify receiver of transmission pace.
+            ModemDecoded syncOut;
+            syncOut.isSyncMark = true;
+            syncOut.modemType  = 1;
+            syncOut.submode    = m_submodeIdx;
+            syncOut.isRawText  = true;
+            cb(syncOut);
+            continue;
+        }
+
+        if (flag == kFlagEom) {
+            // End-of-message frame.
+            ModemDecoded eomOut;
+            eomOut.isEom      = true;
+            eomOut.modemType  = 1;
+            eomOut.submode    = m_submodeIdx;
+            eomOut.isRawText  = true;
+            cb(eomOut);
+            continue;
+        }
+
+        if (flag != kFlagText) continue;
 
         // Extract null-terminated text from bytes[1..payloadBytes-1]
         const char *textPtr = reinterpret_cast<const char *>(&bytesOut[1]);

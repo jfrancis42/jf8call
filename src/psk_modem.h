@@ -86,5 +86,5 @@ private:
     static void charCb(char c, void *ud);
     static void statusCb(float snrDb, float freqOffHz, void *ud);
 
-    void emitMessage(const ModemDecodeCallback &cb, bool force = false);
+    void emitMessage(const ModemDecodeCallback &cb, bool eom = false);
 };

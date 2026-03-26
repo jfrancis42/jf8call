@@ -54,14 +54,21 @@ std::vector<ModemTxFrame> OliviaModem::pack(
     std::string const &text,
     int submode) const
 {
-    // Olivia doesn't have JS8-style framing.  The "payload" is the raw text
-    // prefixed with "MYCALL: " for identification.  A single frame carries
-    // everything; modulate() does the actual encoding.
     const int sm = std::clamp(submode, 0, kOliviaSubmodeCount - 1);
-    std::string payload = mycall + ": " + text;
+    const std::string fullText = mycall + ": " + text;
+
+    // Inject sync heartbeats and an EOM marker (same protocol as PSK modem).
+    std::string payload;
+    payload.reserve(fullText.size() + fullText.size() / kStreamSyncInterval + 2);
+    for (size_t i = 0; i < fullText.size(); ++i) {
+        if (i > 0 && (i % static_cast<size_t>(kStreamSyncInterval)) == 0)
+            payload.push_back(kStreamSyncChar);
+        payload.push_back(fullText[i]);
+    }
+    payload.push_back(kStreamEomChar);
 
     ModemTxFrame f;
-    f.payload   = payload;
+    f.payload   = std::move(payload);
     f.frameType = 0;
     f.submode   = sm;
     return { f };
@@ -106,13 +113,31 @@ void OliviaModem::feedAudio(
 
     m_rx->feedAudio(buf.data(), static_cast<int>(buf.size()),
         [this, &cb](uint8_t ch) {
-            m_rxBuf.push_back(static_cast<char>(ch));
+            const char c = static_cast<char>(ch);
+            if (c == kStreamSyncChar) {
+                // Sync heartbeat: emit sync event, don't accumulate.
+                ModemDecoded d;
+                d.isSyncMark  = true;
+                d.frequencyHz = m_lastFreqHz;
+                d.snrDb       = static_cast<int>(10.0f * std::log10(
+                                    std::max(m_lastSnr, 1e-6f)));
+                d.modemType   = 2;
+                d.submode     = m_submodeIdx;
+                d.isRawText   = true;
+                cb(d);
+                return;
+            }
+            if (c == kStreamEomChar) {
+                emitMessage(cb, /*eom=*/true);
+                return;
+            }
+            m_rxBuf.push_back(c);
             if (ch == '\n' || static_cast<int>(m_rxBuf.size()) >= kFlushLen)
-                emitMessage(cb);
+                emitMessage(cb, /*eom=*/false);
         });
 }
 
-void OliviaModem::emitMessage(const ModemDecodeCallback &cb, bool force)
+void OliviaModem::emitMessage(const ModemDecodeCallback &cb, bool eom)
 {
     // Trim trailing whitespace/nulls that Olivia commonly pads
     while (!m_rxBuf.empty() &&
@@ -120,7 +145,6 @@ void OliviaModem::emitMessage(const ModemDecodeCallback &cb, bool force)
             m_rxBuf.back() == '\r'))
         m_rxBuf.pop_back();
 
-    if (m_rxBuf.empty() && !force) return;
     if (m_rxBuf.empty()) return;
 
     ModemDecoded d;
@@ -129,9 +153,10 @@ void OliviaModem::emitMessage(const ModemDecodeCallback &cb, bool force)
                         std::max(m_lastSnr, 1e-6f)));
     d.frequencyHz = m_lastFreqHz;
     d.submode     = m_submodeIdx;
-    d.modemType   = 2;       // 0=Gfsk8, 1=Codec2, 2=Olivia
-    d.isRawText   = true;    // skip JS8 DecodedText parsing
+    d.modemType   = 2;
+    d.isRawText   = true;
     d.frameType   = 0;
+    d.isEom       = eom;
 
     cb(d);
     m_rxBuf.clear();

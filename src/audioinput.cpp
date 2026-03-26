@@ -285,7 +285,10 @@ int AudioInput::readLatest(std::vector<float> &out, int nSamples)
 std::vector<int16_t> AudioInput::takePeriodBuffer(int &utcOut)
 {
     const QDateTime u = QDateTime::currentDateTimeUtc();
-    utcOut = u.time().hour() * 100 + u.time().minute();
+    // Encode as seconds-since-midnight so the decoder can compute
+    // UTC-aligned kpos from the actual buffer capture time rather
+    // than the (potentially delayed) decode time.
+    utcOut = u.time().hour() * 3600 + u.time().minute() * 60 + u.time().second();
     // Use the full 60-second ring buffer for best decoder performance
     constexpr int bufSamples = k_ringSize;
 
