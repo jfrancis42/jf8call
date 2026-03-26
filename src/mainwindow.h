@@ -30,6 +30,7 @@ class AudioInput;
 class AudioOutput;
 class PeriodClock;
 class WsServer;
+class PskReporter;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -67,6 +68,7 @@ public:
     void apiSetCqMessage(const QString &s);
     void apiSetDistMiles(bool miles);
     void apiSetAutoAtu(bool v);
+    void apiSetPskReporterEnabled(bool v);
     void apiSetAudioInput(const QString &name);
     void apiSetAudioOutput(const QString &name);
     void apiSetRigConfig(const RigConfig &cfg);
@@ -81,6 +83,7 @@ public:
     void apiDisconnectRadio();
     bool apiSetFrequency(double khz);
     bool apiSetPtt(bool on);
+    void apiTuneRadio();
     void apiClearMessages();
 
 protected:
@@ -124,6 +127,7 @@ private slots:
     void onRadioPollTimer();
     void onHeartbeatCheck();
     void startupChecks();
+    void onFrameCleanupTimer();
 
     // Auto-reply
     void sendAutoReply(const QString &toCall, const QString &body, int snrDb);
@@ -226,6 +230,9 @@ private:
     // Focus mode — callsign selected in Info table ("" = none, "@ALL" = broadcast)
     QString m_selectedCallsign;
 
+    // PSK Reporter
+    PskReporter  *m_pskReporter    = nullptr;
+
     // Update checker
     UpdateChecker *m_updateChecker = nullptr;
 
@@ -239,4 +246,16 @@ private:
     int     m_decodeCount = 0;
     QHash<int, int>     m_heardFreqBlock;   // rounded freq (Hz/10) → document block index
     QHash<QString, qint64> m_recentDecodes; // msgKey → epoch_sec, cross-period dedup
+
+    // GFSK8 multi-frame assembly buffer.
+    // Keyed by round(freqHz/10); holds accumulated rawText across frame periods.
+    struct GfskFrameBuffer {
+        QString assembledRawText; ///< rawText from first + middle frames
+        qint64  firstSeenSec;     ///< epoch seconds when first frame arrived
+        float   freqHz;           ///< audio frequency (for re-creating ModemDecoded)
+        int     snrDb;            ///< SNR from first frame
+        int     submode;
+    };
+    QHash<int, GfskFrameBuffer> m_gfsk8FrameBuffers;
+    QTimer *m_frameCleanupTimer = nullptr;
 };
