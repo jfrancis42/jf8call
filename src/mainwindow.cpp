@@ -1038,6 +1038,7 @@ void MainWindow::onSpectrumReady(std::vector<float> magnitudes, float sampleRate
         m_waterfall->addLine(magnitudes, sampleRateHz);
     if (m_wsServer)
         m_wsServer->pushSpectrum(magnitudes, sampleRateHz);
+    emit spectrumReady(magnitudes, sampleRateHz);
 }
 
 void MainWindow::onPeriodStarted(int utc)
@@ -1267,6 +1268,7 @@ void MainWindow::onDecodeFinished(const QList<QVariantMap> &results)
             m_model->addMessage(msg);
         if (m_wsServer)
             m_wsServer->pushMessageDecoded(msg);
+        emit messageDecoded(msg);
 
         // PSK Reporter: submit spot for every decode with a known callsign.
         // Dial frequency (kHz) + audio offset (Hz) gives spot frequency in Hz.
@@ -1809,10 +1811,12 @@ void MainWindow::setTransmitting(bool tx)
         m_rxTxLabel->setText(tr("TX"));
         m_rxTxLabel->setStyleSheet(QStringLiteral("color: #cc2222; font-weight: bold;"));
         if (m_wsServer) m_wsServer->pushTxStarted();
+        emit txStarted();
     } else {
         m_rxTxLabel->setText(tr("RX"));
         m_rxTxLabel->setStyleSheet(QStringLiteral("color: #7fbf7f; font-weight: bold;"));
         if (m_wsServer) m_wsServer->pushTxFinished();
+        emit txFinished();
     }
 }
 
@@ -1889,6 +1893,7 @@ void MainWindow::onFrameCleanupTimer()
                     buf.assembledRawText, m_config.callsign);
                 if (!msg.from.isEmpty()) m_model->addMessage(msg);
                 if (m_wsServer) m_wsServer->pushMessageDecoded(msg);
+                emit messageDecoded(msg);
                 // Append timeout marker to heard pane
                 const int fKey = qRound(buf.freqHz / 10.0f);
                 auto hIt = m_heardFreqBlock.find(fKey);
@@ -2461,6 +2466,7 @@ void MainWindow::onRadioConnectionChanged(bool connected)
         m_radioPollTimer->stop();
         if (m_wsServer) m_wsServer->pushRadioDisconnected();
     }
+    emit radioStatusChanged();
 }
 
 void MainWindow::onRadioPollResult(double khz, const QString &mode)
@@ -2469,6 +2475,7 @@ void MainWindow::onRadioPollResult(double khz, const QString &mode)
     m_radioMode    = mode;
     m_radioStatusLabel->setText(
         QStringLiteral("Radio: %1 kHz / %2").arg(khz, 0, 'f', 3).arg(mode));
+    emit radioStatusChanged();
 }
 
 void MainWindow::onRadioError(const QString &msg)

@@ -23,6 +23,7 @@
 #include "hamlibcontroller.h"
 #include "updatechecker.h"
 #include "imodem.h"
+#include "js8message.h"
 
 class MessageModel;
 class WaterfallWidget;
@@ -135,6 +136,13 @@ private slots:
 signals:
     // Sent to DecodeWorker on its thread
     void requestDecode(QByteArray samples12k, int utc, int submodes);
+
+    // TUI / external observer signals
+    void messageDecoded(const JS8Message &msg);
+    void spectrumReady(std::vector<float> bins, float sampleRate);
+    void txStarted();
+    void txFinished();
+    void radioStatusChanged();
 
 private:
     void setupUi();
