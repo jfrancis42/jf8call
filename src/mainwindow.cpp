@@ -2742,57 +2742,63 @@ bool MainWindow::apiSetPtt(bool on)
     return true;
 }
 
-int MainWindow::apiGetRfPower() const
+int MainWindow::apiGetRfPower(QString *err) const
 {
     int result = -1;
     QMetaObject::invokeMethod(m_hamlib, [this, &result]() {
         result = m_hamlib->getRfPower();
     }, Qt::BlockingQueuedConnection);
+    if (result < 0 && err) *err = m_hamlib->lastError();
     return result;
 }
 
-bool MainWindow::apiSetRfPower(int pct)
+bool MainWindow::apiSetRfPower(int pct, QString *err)
 {
     bool ok = false;
     QMetaObject::invokeMethod(m_hamlib, [this, pct, &ok]() {
         ok = m_hamlib->setRfPower(pct);
     }, Qt::BlockingQueuedConnection);
+    if (!ok && err) *err = m_hamlib->lastError();
     return ok;
 }
 
-int MainWindow::apiGetAfVolume() const
+int MainWindow::apiGetAfVolume(QString *err) const
 {
     int result = -1;
     QMetaObject::invokeMethod(m_hamlib, [this, &result]() {
         result = m_hamlib->getAfVolume();
     }, Qt::BlockingQueuedConnection);
+    if (result < 0 && err) *err = m_hamlib->lastError();
     return result;
 }
 
-bool MainWindow::apiSetAfVolume(int pct)
+bool MainWindow::apiSetAfVolume(int pct, QString *err)
 {
     bool ok = false;
     QMetaObject::invokeMethod(m_hamlib, [this, pct, &ok]() {
         ok = m_hamlib->setAfVolume(pct);
     }, Qt::BlockingQueuedConnection);
+    if (!ok && err) *err = m_hamlib->lastError();
     return ok;
 }
 
-int MainWindow::apiGetMute() const
+int MainWindow::apiGetMute(QString *err) const
 {
     int result = -1;
     QMetaObject::invokeMethod(m_hamlib, [this, &result]() {
         result = m_hamlib->getMute();
     }, Qt::BlockingQueuedConnection);
+    if (result < 0 && err) *err = m_hamlib->lastError();
     return result;
 }
 
-bool MainWindow::apiSetMute(bool muted)
+bool MainWindow::apiSetMute(bool muted, QString *err)
 {
     bool ok = false;
     QMetaObject::invokeMethod(m_hamlib, [this, muted, &ok]() {
         ok = m_hamlib->setMute(muted);
     }, Qt::BlockingQueuedConnection);
+    if (!ok && err) *err = m_hamlib->lastError();
     return ok;
 }
 

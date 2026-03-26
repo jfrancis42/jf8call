@@ -34,6 +34,7 @@ public:
 
     bool isConnected() const;
     QStringList availableRigs() const;
+    QString lastError() const { return m_lastError; }
 
     Q_INVOKABLE double  getFrequency() const;
     Q_INVOKABLE QString getMode()      const;
@@ -64,6 +65,7 @@ private:
     RIG *m_rig = nullptr;
 #endif
     std::atomic<bool> m_connected{false};
+    QString m_lastError;
     int  m_pttType           = 0;
     int  m_consecutiveErrors = 0;
     static constexpr int k_maxConsecutiveErrors = 5;
