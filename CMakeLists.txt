@@ -410,3 +410,11 @@ endif()
 # ── Install ───────────────────────────────────────────────────────────────────
 include(GNUInstallDirs)
 install(TARGETS jf8call RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+# ── jf8-tool ──────────────────────────────────────────────────────────────────
+# Standalone WebSocket API CLI tool.  Only needs Qt6::Core + Qt6::WebSockets;
+# no audio, no modem libraries, no Hamlib required.
+add_executable(jf8-tool src/jf8-tool.cpp)
+target_include_directories(jf8-tool PRIVATE "${CMAKE_BINARY_DIR}")
+target_link_libraries(jf8-tool PRIVATE Qt6::Core Qt6::WebSockets)
+install(TARGETS jf8-tool RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
