@@ -309,6 +309,110 @@ Direct PTT control. Use with caution — the TX queue manages PTT automatically 
 
 ---
 
+### `radio.power.get` — Get TX power level
+
+```json
+{ "type": "cmd", "cmd": "radio.power.get" }
+```
+
+Reads the current RF transmit power level from the rig via Hamlib (`RIG_LEVEL_RFPOWER`). Requires a connected rig. Returns an error if the rig does not support this level.
+
+Reply `data`:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `power_pct` | int | TX power as a percentage, 0–100 |
+
+---
+
+### `radio.power.set` — Set TX power level
+
+```json
+{
+  "type": "cmd",
+  "cmd": "radio.power.set",
+  "data": { "power_pct": 50 }
+}
+```
+
+Sets the RF transmit power level via Hamlib (`RIG_LEVEL_RFPOWER`). Requires a connected rig. `power_pct` must be 0–100.
+
+Reply `data`:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `power_pct` | int | Power level that was set |
+
+---
+
+### `radio.volume.get` — Get AF (speaker) volume
+
+```json
+{ "type": "cmd", "cmd": "radio.volume.get" }
+```
+
+Reads the current AF (audio frequency / speaker) volume from the rig via Hamlib (`RIG_LEVEL_AF`). Requires a connected rig. Returns an error if the rig does not support this level.
+
+Reply `data`:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `volume` | int | AF volume level, 0–100 |
+
+---
+
+### `radio.volume.set` — Set AF volume
+
+```json
+{
+  "type": "cmd",
+  "cmd": "radio.volume.set",
+  "data": { "volume": 75 }
+}
+```
+
+Sets the AF (speaker) volume via Hamlib (`RIG_LEVEL_AF`). Requires a connected rig. `volume` must be 0–100.
+
+Reply `data`:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `volume` | int | Volume level that was set |
+
+---
+
+### `radio.mute` — Mute radio audio
+
+```json
+{ "type": "cmd", "cmd": "radio.mute" }
+```
+
+Mutes the radio speaker via Hamlib (`RIG_FUNC_MUTE`). Requires a connected rig. Returns an error if the rig does not support this function.
+
+Reply `data`:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `muted` | bool | Always `true` |
+
+---
+
+### `radio.unmute` — Unmute radio audio
+
+```json
+{ "type": "cmd", "cmd": "radio.unmute" }
+```
+
+Unmutes the radio speaker via Hamlib (`RIG_FUNC_MUTE`). Requires a connected rig. Returns an error if the rig does not support this function.
+
+Reply `data`:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `muted` | bool | Always `false` |
+
+---
+
 ### `messages.get` — Get decoded message log
 
 ```json

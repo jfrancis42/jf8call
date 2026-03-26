@@ -37,6 +37,9 @@ public:
 
     Q_INVOKABLE double  getFrequency() const;
     Q_INVOKABLE QString getMode()      const;
+    Q_INVOKABLE int     getRfPower()   const;   // 0-100 %; -1 on error/unsupported
+    Q_INVOKABLE int     getAfVolume()  const;   // 0-100 ; -1 on error/unsupported
+    Q_INVOKABLE int     getMute()      const;   // 1=muted 0=unmuted -1 on error/unsupported
 
 public slots:
     bool connectRig(const RigConfig &cfg);
@@ -44,6 +47,9 @@ public slots:
     bool setFrequency(double khz);
     bool tune(double khz, const QString &mode = QString());
     bool setPtt(bool transmit);
+    bool setRfPower(int pct);    // 0-100 %
+    bool setAfVolume(int pct);   // 0-100
+    bool setMute(bool muted);
     void requestPoll();
     void startTune();   // trigger ATU tuning cycle (RIG_OP_TUNE)
 

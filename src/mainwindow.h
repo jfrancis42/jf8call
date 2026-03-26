@@ -85,6 +85,12 @@ public:
     bool apiSetFrequency(double khz);
     bool apiSetPtt(bool on);
     void apiTuneRadio();
+    int  apiGetRfPower()     const;   // 0-100 %; -1 if unsupported/disconnected
+    bool apiSetRfPower(int pct);      // 0-100 %
+    int  apiGetAfVolume()    const;   // 0-100 ; -1 if unsupported/disconnected
+    bool apiSetAfVolume(int pct);     // 0-100
+    int  apiGetMute()        const;   // 1=muted 0=unmuted -1 if unsupported/disconnected
+    bool apiSetMute(bool muted);
     void apiClearMessages();
 
 protected:

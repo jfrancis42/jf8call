@@ -17,6 +17,12 @@
  *   radio freq KHZ                      Set VFO frequency (kHz)
  *   radio ptt on|off                    Set PTT
  *   radio tune                          Trigger ATU tune
+ *   radio power                         Get TX power (0-100 %)
+ *   radio power PCT                     Set TX power (0-100 %)
+ *   radio volume                        Get AF volume (0-100)
+ *   radio volume N                      Set AF volume (0-100)
+ *   radio mute                          Mute the radio
+ *   radio unmute                        Unmute the radio
  *   messages [--offset N] [--limit N]   View decoded messages
  *   messages clear                      Clear message log
  *   spectrum                            Show spectrum snapshot
@@ -84,6 +90,10 @@ struct Args {
     // radio ptt
     QString radioState;   // "on" | "off"
 
+    // radio power / volume
+    int  radioPowerPct = -1;   // -1 = get, 0-100 = set
+    int  radioVolume   = -1;   // -1 = get, 0-100 = set
+
     // messages
     int messagesOffset = 0;
     int messagesLimit  = 50;
@@ -124,6 +134,12 @@ static void printUsage()
 "  radio freq KHZ                      Set VFO frequency (kHz)\n"
 "  radio ptt on|off                    Set PTT\n"
 "  radio tune                          Trigger ATU tune\n"
+"  radio power                         Get TX power level (0-100 %%)\n"
+"  radio power PCT                     Set TX power level (0-100 %%)\n"
+"  radio volume                        Get AF (speaker) volume (0-100)\n"
+"  radio volume N                      Set AF volume (0-100)\n"
+"  radio mute                          Mute the radio audio\n"
+"  radio unmute                        Unmute the radio audio\n"
 "  messages [--offset N] [--limit N]   View decoded messages (default limit: 50)\n"
 "  messages clear                      Clear message log\n"
 "  spectrum                            Show spectrum snapshot\n"
@@ -252,8 +268,27 @@ static bool parseArgs(int argc, char *argv[], Args &out, int &exitCode)
             exitCode = 1; return false;
         }
         out.sub = QString::fromStdString(av[i++]);
-        if (out.sub == "get" || out.sub == "disconnect" || out.sub == "tune") {
+        if (out.sub == "get" || out.sub == "disconnect" || out.sub == "tune"
+         || out.sub == "mute" || out.sub == "unmute") {
             // no arguments
+        } else if (out.sub == "power") {
+            // optional integer argument — get if absent, set if present
+            if (i < av.size() && av[i][0] != '-') {
+                out.radioPowerPct = std::stoi(av[i++]);
+                if (out.radioPowerPct < 0 || out.radioPowerPct > 100) {
+                    std::cerr << "radio power: value must be 0-100\n";
+                    exitCode=1; return false;
+                }
+            }
+        } else if (out.sub == "volume") {
+            // optional integer argument
+            if (i < av.size() && av[i][0] != '-') {
+                out.radioVolume = std::stoi(av[i++]);
+                if (out.radioVolume < 0 || out.radioVolume > 100) {
+                    std::cerr << "radio volume: value must be 0-100\n";
+                    exitCode=1; return false;
+                }
+            }
         } else if (out.sub == "connect") {
             while (i < av.size()) {
                 const std::string &a = av[i];
@@ -278,7 +313,8 @@ static bool parseArgs(int argc, char *argv[], Args &out, int &exitCode)
                 std::cerr << "radio ptt: expected 'on' or 'off'\n"; exitCode=1; return false;
             }
         } else {
-            std::cerr << "radio: unknown subcommand '" << out.sub.toStdString() << "'\n";
+            std::cerr << "radio: unknown subcommand '" << out.sub.toStdString() << "'\n"
+                      << "Valid: get, connect, disconnect, freq, ptt, tune, power, volume, mute, unmute\n";
             exitCode=1; return false;
         }
 
@@ -496,6 +532,8 @@ private:
             if      (sub == "get")        sendCmd("radio.get");
             else if (sub == "disconnect") sendCmd("radio.disconnect");
             else if (sub == "tune")       sendCmd("radio.tune");
+            else if (sub == "mute")       sendCmd("radio.mute");
+            else if (sub == "unmute")     sendCmd("radio.unmute");
             else if (sub == "connect") {
                 QJsonObject data;
                 if (m_args.radioModel >= 0)   data["rig_model"] = m_args.radioModel;
@@ -508,6 +546,16 @@ private:
             } else if (sub == "ptt") {
                 bool ptt = (m_args.radioState == "on");
                 sendCmd("radio.ptt.set", QJsonObject{{"ptt", ptt}});
+            } else if (sub == "power") {
+                if (m_args.radioPowerPct < 0)
+                    sendCmd("radio.power.get");
+                else
+                    sendCmd("radio.power.set", QJsonObject{{"power_pct", m_args.radioPowerPct}});
+            } else if (sub == "volume") {
+                if (m_args.radioVolume < 0)
+                    sendCmd("radio.volume.get");
+                else
+                    sendCmd("radio.volume.set", QJsonObject{{"volume", m_args.radioVolume}});
             }
 
         } else if (cmd == "messages") {
@@ -690,6 +738,24 @@ private:
                 int ptt = data["ptt_type"].toInt();
                 printf("PTT type  : %s\n",
                     (ptt >= 0 && ptt <= 3) ? pttNames[ptt] : "?");
+            } else if (sub == "power") {
+                if (!ok) { errMsg(); return; }
+                if (m_args.radioPowerPct < 0)
+                    printf("TX power: %d%%\n", data["power_pct"].toInt());
+                else
+                    printf("TX power set to %d%%\n", data["power_pct"].toInt());
+            } else if (sub == "volume") {
+                if (!ok) { errMsg(); return; }
+                if (m_args.radioVolume < 0)
+                    printf("AF volume: %d\n", data["volume"].toInt());
+                else
+                    printf("AF volume set to %d\n", data["volume"].toInt());
+            } else if (sub == "mute") {
+                if (!ok) { errMsg(); return; }
+                printf("Radio muted\n");
+            } else if (sub == "unmute") {
+                if (!ok) { errMsg(); return; }
+                printf("Radio unmuted\n");
             } else {
                 okOrErr();
             }
