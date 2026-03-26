@@ -62,6 +62,19 @@
 #include <string>
 #include <vector>
 
+// Suppress a benign Qt WebSocket teardown warning: Qt's internal QTcpSocket emits
+// a "wildcard call disconnects from destroyed signal" warning during cleanup of
+// QWebSocket objects, which is a known Qt bug/quirk with no clean workaround.
+static void qtMsgHandler(QtMsgType type, const QMessageLogContext &, const QString &msg)
+{
+    if (msg.contains(QLatin1String("wildcard call disconnects from destroyed")))
+        return;
+    if (type == QtWarningMsg || type == QtCriticalMsg || type == QtFatalMsg)
+        fprintf(stderr, "%s\n", qPrintable(msg));
+    if (type == QtFatalMsg)
+        std::abort();
+}
+
 // ── Signal handling ───────────────────────────────────────────────────────────
 
 static void sigHandler(int) { QCoreApplication::quit(); }
@@ -973,10 +986,6 @@ private:
         if (m_timer) m_timer->stop();
         disconnect(m_ws, nullptr, this, nullptr);
         m_ws->abort();
-        // Explicitly destroy the socket now, in a clean context, so Qt doesn't
-        // do it during app teardown and emit QTcpSocket wildcard-disconnect warnings.
-        delete m_ws;
-        m_ws = nullptr;
         QCoreApplication::exit(code);
     }
 
@@ -1001,6 +1010,7 @@ private:
 
 int main(int argc, char *argv[])
 {
+    qInstallMessageHandler(qtMsgHandler);
     QCoreApplication app(argc, argv);
     app.setApplicationName(QStringLiteral("jf8-tool"));
     app.setApplicationVersion(QStringLiteral(JF8CALL_VERSION_STR));
