@@ -23,7 +23,7 @@
 #include "hamlibcontroller.h"
 #include "updatechecker.h"
 #include "imodem.h"
-#include "js8message.h"
+#include "jf8message.h"
 #include "solardata.h"
 #include "freqschedule.h"
 
@@ -120,6 +120,10 @@ public:
     void apiSetBandList(const QList<BandEntry> &bands);
     QJsonArray apiGetBandList() const;
 
+    // Group memberships
+    void apiSetGroups(const QStringList &groups);
+    QStringList apiGetGroups() const;
+
 protected:
     void closeEvent(QCloseEvent *) override;
     void showEvent(QShowEvent *) override;
@@ -194,7 +198,7 @@ signals:
     void requestDecode(QByteArray samples12k, int utc, int submodes);
 
     // TUI / external observer signals
-    void messageDecoded(const JS8Message &msg);
+    void messageDecoded(const JF8Message &msg);
     void spectrumReady(std::vector<float> bins, float sampleRate);
     void txStarted();
     void txFinished();

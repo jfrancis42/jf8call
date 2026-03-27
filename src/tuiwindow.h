@@ -14,7 +14,7 @@
 #include <QTimer>
 #include <QSocketNotifier>
 #include <vector>
-#include "js8message.h"
+#include "jf8message.h"
 
 class MainWindow;
 
@@ -27,7 +27,7 @@ public:
     void start();
 
 private slots:
-    void onMessageDecoded(const JS8Message &msg);
+    void onMessageDecoded(const JF8Message &msg);
     void onSpectrumReady(std::vector<float> bins, float sampleRate);
     void onTxStarted();
     void onTxFinished();

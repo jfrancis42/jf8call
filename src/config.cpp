@@ -153,6 +153,11 @@ Config Config::load()
         c.bandList.append(BandEntry::fromJson(v.toObject()));
     for (const QJsonValue &v : o.value(u"freqSchedule").toArray())
         c.freqSchedule.append(FreqScheduleEntry::fromJson(v.toObject()));
+    if (o.contains(u"groups")) {
+        for (const QJsonValue &v : o.value(u"groups").toArray())
+            c.groups.append(v.toString().toUpper());
+    }
+    // else: default {QStringLiteral("@ALL")} from struct initialiser
     c.windowGeometry = QByteArray::fromBase64(
         o.value(u"windowGeometry").toString().toLatin1());
     c.windowState = QByteArray::fromBase64(
@@ -226,6 +231,12 @@ void Config::save() const
         for (const FreqScheduleEntry &e : freqSchedule)
             arr.append(e.toJson());
         o[u"freqSchedule"] = arr;
+    }
+    {
+        QJsonArray arr;
+        for (const QString &g : groups)
+            arr.append(g);
+        o[u"groups"] = arr;
     }
     o[u"windowGeometry"]           = QString::fromLatin1(windowGeometry.toBase64());
     o[u"windowState"]              = QString::fromLatin1(windowState.toBase64());

@@ -25,7 +25,7 @@
 #include <vector>
 
 class MainWindow;
-#include "js8message.h"
+#include "jf8message.h"
 
 class WsServer : public QObject {
     Q_OBJECT
@@ -42,7 +42,7 @@ public:
     // ── Push events to all connected clients ─────────────────────────────
     // Called by MainWindow at the appropriate points in the application.
 
-    void pushMessageDecoded(const JS8Message &msg);
+    void pushMessageDecoded(const JF8Message &msg);
     void pushMessageFrame(float freqHz, int snrDb, int submode, int modemType,
                           int frameType, const QString &frameText,
                           const QString &assembledText, const QDateTime &utc);
@@ -114,7 +114,7 @@ private:
     QJsonObject cmdTxHearingQuery(const QJsonObject &d);
 
     QJsonObject buildStatusObject() const;
-    static QString messageTypeName(JS8Message::Type t);
+    static QString messageTypeName(JF8Message::Type t);
 
     QWebSocketServer *m_srv;
     MainWindow       *m_app;

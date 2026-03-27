@@ -108,6 +108,10 @@ struct Config {
     // Frequency schedule (automatic band/frequency changes)
     QList<FreqScheduleEntry> freqSchedule;
 
+    // Group memberships (e.g. "@ALL", "@PRA", "@AMRRON")
+    // Messages addressed to any of these groups are treated as directed to me.
+    QStringList groups = {QStringLiteral("@ALL")};
+
     // Window state
     QByteArray windowGeometry;
     QByteArray windowState;

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-#include "js8message.h"
+#include "jf8message.h"
 #include "checksum.h"
 #include "DecodedText.h"
 #include <QStringList>
@@ -28,18 +28,21 @@ QString submodeName(int submodeEnum, int modemType)
     }
 }
 
-bool JS8Message::isAddressedToMe(const QString &mycall) const
+bool JF8Message::isAddressedToMe(const QString &mycall, const QStringList &groups) const
 {
     if (mycall.isEmpty()) return false;
-    const QString mc = mycall.toUpper();
-    return to.toUpper() == mc;
+    const QString toUp = to.toUpper();
+    if (toUp == mycall.toUpper()) return true;
+    for (const QString &g : groups)
+        if (!g.isEmpty() && toUp == g.toUpper()) return true;
+    return false;
 }
 
-JS8Message parseDecoded(const ModemDecoded &d,
+JF8Message parseDecoded(const ModemDecoded &d,
                         const QString &rawTextHint,
                         const QString &mycall)
 {
-    JS8Message msg;
+    JF8Message msg;
     msg.utc         = QDateTime::currentDateTimeUtc();
     msg.audioFreqHz = d.frequencyHz;
     msg.snrDb       = d.snrDb;
@@ -59,7 +62,7 @@ JS8Message parseDecoded(const ModemDecoded &d,
         } else {
             msg.body = msg.rawText;
         }
-        msg.type = JS8Message::Type::DirectedMessage;
+        msg.type = JF8Message::Type::DirectedMessage;
         msg.grid = extractGrid(msg.rawText);
         Q_UNUSED(mycall)
         return msg;
@@ -94,7 +97,7 @@ JS8Message parseDecoded(const ModemDecoded &d,
     if (!msg.from.isEmpty() && !msg.to.isEmpty() && !msg.rawText.isEmpty()) {
         QString rawStripped = msg.rawText;
         bool crcValid = false;
-        if (JS8Checksum::tryStrip(rawStripped, crcValid)) {
+        if (JF8Checksum::tryStrip(rawStripped, crcValid)) {
             msg.hasChecksum  = true;
             msg.checksumValid = crcValid;
             msg.rawText = rawStripped;
@@ -102,7 +105,7 @@ JS8Message parseDecoded(const ModemDecoded &d,
             if (!msg.body.isEmpty()) {
                 QString bodyStripped = msg.body;
                 bool unused = false;
-                JS8Checksum::tryStrip(bodyStripped, unused);
+                JF8Checksum::tryStrip(bodyStripped, unused);
                 msg.body = bodyStripped;
             }
         }
@@ -113,54 +116,54 @@ JS8Message parseDecoded(const ModemDecoded &d,
     const QString toUpper   = msg.to.toUpper();
 
     if (dt.isHeartbeat() || bodyUpper.contains(QLatin1String("@HB"))) {
-        msg.type = JS8Message::Type::Heartbeat;
+        msg.type = JF8Message::Type::Heartbeat;
         if (msg.to.isEmpty()) msg.to = QStringLiteral("@HB");
     } else if (bodyUpper == QLatin1String("@SNR?") ||
                msg.rawText.contains(QLatin1String("@SNR?"))) {
-        msg.type = JS8Message::Type::SnrQuery;
+        msg.type = JF8Message::Type::SnrQuery;
     } else if (bodyUpper.startsWith(QLatin1String("SNR ")) ||
                bodyUpper.contains(QLatin1String(" SNR "))) {
-        msg.type = JS8Message::Type::SnrReply;
+        msg.type = JF8Message::Type::SnrReply;
     } else if (bodyUpper == QLatin1String("@INFO?") ||
                msg.rawText.contains(QLatin1String("@INFO?"))) {
-        msg.type = JS8Message::Type::InfoQuery;
+        msg.type = JF8Message::Type::InfoQuery;
     } else if (bodyUpper.startsWith(QLatin1String("INFO "))) {
-        msg.type = JS8Message::Type::InfoReply;
+        msg.type = JF8Message::Type::InfoReply;
     } else if (bodyUpper == QLatin1String("@?") ||
                msg.rawText.contains(QLatin1String(" @?")) ||
                bodyUpper == QLatin1String("@STATUS?") ||
                msg.rawText.contains(QLatin1String("@STATUS?"))) {
-        msg.type = JS8Message::Type::StatusQuery;
+        msg.type = JF8Message::Type::StatusQuery;
     } else if (bodyUpper == QLatin1String("HEARD") ||
                bodyUpper.startsWith(QLatin1String("STATUS "))) {
-        msg.type = JS8Message::Type::StatusReply;
+        msg.type = JF8Message::Type::StatusReply;
     } else if (bodyUpper == QLatin1String("@GRID?") ||
                msg.rawText.contains(QLatin1String("@GRID?"))) {
-        msg.type = JS8Message::Type::GridQuery;
+        msg.type = JF8Message::Type::GridQuery;
     } else if (bodyUpper.startsWith(QLatin1String("GRID "))) {
-        msg.type = JS8Message::Type::GridReply;
+        msg.type = JF8Message::Type::GridReply;
     } else if (bodyUpper == QLatin1String("@HEARING?") ||
                msg.rawText.contains(QLatin1String("@HEARING?"))) {
-        msg.type = JS8Message::Type::HearingQuery;
+        msg.type = JF8Message::Type::HearingQuery;
     } else if (bodyUpper.startsWith(QLatin1String("HEARING "))) {
-        msg.type = JS8Message::Type::HearingReply;
+        msg.type = JF8Message::Type::HearingReply;
     } else if (bodyUpper == QLatin1String("ACK")) {
-        msg.type = JS8Message::Type::AckMessage;
+        msg.type = JF8Message::Type::AckMessage;
     } else if (bodyUpper.startsWith(QLatin1String("MSG "))) {
-        msg.type = JS8Message::Type::MsgCommand;
+        msg.type = JF8Message::Type::MsgCommand;
     } else if (bodyUpper == QLatin1String("QUERY MSGS")) {
-        msg.type = JS8Message::Type::QueryMsgs;
+        msg.type = JF8Message::Type::QueryMsgs;
     } else if (bodyUpper.startsWith(QLatin1String("QUERY MSG "))) {
-        msg.type = JS8Message::Type::QueryMsg;
+        msg.type = JF8Message::Type::QueryMsg;
     } else if (bodyUpper == QLatin1String("NO")) {
-        msg.type = JS8Message::Type::MsgNotAvailable;
+        msg.type = JF8Message::Type::MsgNotAvailable;
     } else if (bodyUpper.startsWith(QLatin1String("YES MSG ID "))) {
-        msg.type = JS8Message::Type::MsgAvailable;
+        msg.type = JF8Message::Type::MsgAvailable;
     } else if (bodyUpper.startsWith(QLatin1String("MSG ")) &&
                bodyUpper.contains(QLatin1String(" FROM "))) {
-        msg.type = JS8Message::Type::MsgDelivery;
+        msg.type = JF8Message::Type::MsgDelivery;
     } else if (dt.isDirectedMessage()) {
-        msg.type = JS8Message::Type::DirectedMessage;
+        msg.type = JF8Message::Type::DirectedMessage;
     }
 
     // Extract grid from raw text (present in heartbeats: "W5XYZ DM79AA @HB")
