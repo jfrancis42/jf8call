@@ -39,6 +39,7 @@
  *   bands set NAME FREQ_KHZ [TX_HZ]    Add a single band entry
  *   bands reset                         Reset to defaults
  *   solar                               Show solar data
+ *   version                             Show JF8Call version info
  *   qso [--offset N] [--limit N]        Show QSO log
  *   qso adif                            Export QSO log as ADIF
  *   inbox                               List inbox messages
@@ -188,6 +189,7 @@ static void printUsage()
 "  bands set NAME FREQ_KHZ [TX_HZ]    Add or update a band entry\n"
 "  bands reset                         Reset to factory defaults\n"
 "  solar                               Show current solar data\n"
+"  version                             Show JF8Call version info\n"
 "  qso [--offset N] [--limit N]        Show QSO log\n"
 "  qso adif                            Export QSO log as ADIF to stdout\n"
 "  inbox                               List inbox messages\n"
@@ -455,6 +457,10 @@ static bool parseArgs(int argc, char *argv[], Args &out, int &exitCode)
     } else if (out.cmd == "solar") {
         // no arguments
 
+    // ── version ───────────────────────────────────────────────────────────────
+    } else if (out.cmd == "version") {
+        // no arguments
+
     // ── qso ───────────────────────────────────────────────────────────────────
     } else if (out.cmd == "qso") {
         if (i < av.size() && av[i] == "adif") {
@@ -708,6 +714,9 @@ private:
 
         } else if (cmd == "solar") {
             sendCmd("solar.get");
+
+        } else if (cmd == "version") {
+            sendCmd("version.get");
 
         } else if (cmd == "qso") {
             if (sub == "adif") {
@@ -993,6 +1002,15 @@ private:
             printf("R    : R%d\n",  data["r_scale"].toInt());
             printf("Band : %s\n",   data["band_conditions"].toString().toUtf8().constData());
             printf("UTC  : %s\n",   data["updated_utc"].toString().toUtf8().constData());
+
+        // ── version ───────────────────────────────────────────────────────────
+        } else if (cmd == "version") {
+            if (!ok) { errMsg(); return; }
+            printf("Version : %s\n",  data["version"].toString().toUtf8().constData());
+            printf("Major   : %d\n",  data["major"].toInt());
+            printf("Minor   : %d\n",  data["minor"].toInt());
+            printf("Patch   : %d\n",  data["patch"].toInt());
+            printf("Release : %s\n",  data["release"].toString().toUtf8().constData());
 
         // ── qso ──────────────────────────────────────────────────────────────
         } else if (cmd == "qso") {

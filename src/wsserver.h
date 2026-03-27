@@ -112,6 +112,7 @@ private:
     QJsonObject cmdBandsSet(const QJsonObject &d);
     QJsonObject cmdTxGridQuery(const QJsonObject &d);
     QJsonObject cmdTxHearingQuery(const QJsonObject &d);
+    QJsonObject cmdVersionGet(const QJsonObject &d);
 
     QJsonObject buildStatusObject() const;
     static QString messageTypeName(JF8Message::Type t);

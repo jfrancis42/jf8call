@@ -11,6 +11,7 @@
 #include "qsolog.h"
 #include "messageinbox.h"
 #include "freqschedule.h"
+#include "jf8call_version.h"
 
 #include <QTimer>
 #include <QJsonDocument>
@@ -196,6 +197,7 @@ void WsServer::handleCommand(QWebSocket *client, const QJsonObject &msg)
         { QStringLiteral("bands.set"),            &WsServer::cmdBandsSet        },
         { QStringLiteral("tx.grid"),              &WsServer::cmdTxGridQuery     },
         { QStringLiteral("tx.hearing"),           &WsServer::cmdTxHearingQuery  },
+        { QStringLiteral("version.get"),          &WsServer::cmdVersionGet      },
     };
 
     auto it = kHandlers.find(cmd);
@@ -1010,6 +1012,35 @@ QJsonObject WsServer::cmdTxHearingQuery(const QJsonObject &d)
     m_app->apiQueueTx(to + QStringLiteral(" ") + mycall + QStringLiteral(": @HEARING?"));
     QJsonObject r;
     r[QStringLiteral("queued")] = true;
+    return r;
+}
+
+QJsonObject WsServer::cmdVersionGet(const QJsonObject &)
+{
+    // Parse JF8CALL_VERSION_STR (e.g. "0.6.2-ALPHA") into components.
+    const QString full = QString::fromLatin1(JF8CALL_VERSION_STR);
+    const int dash = full.indexOf('-');
+    const QString numeric  = (dash >= 0) ? full.left(dash)  : full;
+    const QString suffix   = (dash >= 0) ? full.mid(dash + 1) : QString();
+
+    const QStringList parts = numeric.split('.');
+    const int major = (parts.size() > 0) ? parts[0].toInt() : 0;
+    const int minor = (parts.size() > 1) ? parts[1].toInt() : 0;
+    const int patch = (parts.size() > 2) ? parts[2].toInt() : 0;
+
+    QString release;
+    if      (suffix.compare(QStringLiteral("ALPHA"), Qt::CaseInsensitive) == 0) release = QStringLiteral("ALPHA");
+    else if (suffix.compare(QStringLiteral("BETA"),  Qt::CaseInsensitive) == 0) release = QStringLiteral("BETA");
+    else if (suffix.compare(QStringLiteral("RC"),    Qt::CaseInsensitive) == 0) release = QStringLiteral("RC");
+    else if (suffix.isEmpty())                                                   release = QStringLiteral("RELEASE");
+    else                                                                         release = suffix.toUpper();
+
+    QJsonObject r;
+    r[QStringLiteral("version")] = full;
+    r[QStringLiteral("major")]   = major;
+    r[QStringLiteral("minor")]   = minor;
+    r[QStringLiteral("patch")]   = patch;
+    r[QStringLiteral("release")] = release;
     return r;
 }
 

@@ -48,6 +48,18 @@ int main(int argc, char *argv[])
         }
     }
 
+    // Auto-detect headless: no DISPLAY and no WAYLAND_DISPLAY → go headless
+    // so the app doesn't crash when launched over SSH without X forwarding.
+    if (!headless && !tui) {
+        const bool hasDisplay = qEnvironmentVariableIsSet("DISPLAY") ||
+                                qEnvironmentVariableIsSet("WAYLAND_DISPLAY");
+        if (!hasDisplay) {
+            headless = true;
+            fprintf(stderr, "jf8call %s — no display detected, running headless\n",
+                    JF8CALL_VERSION_STR);
+        }
+    }
+
     // --headless / --text: use Qt offscreen platform so no display connection is needed.
     // The offscreen plugin ships with qt6-base (libqoffscreen.so) and renders
     // to memory — all QObject / QTimer / audio / WS logic works normally.
