@@ -97,9 +97,9 @@ JF8Message parseDecoded(const ModemDecoded &d,
     if (!msg.from.isEmpty() && !msg.to.isEmpty() && !msg.rawText.isEmpty()) {
         QString rawStripped = msg.rawText;
         bool crcValid = false;
-        if (JF8Checksum::tryStrip(rawStripped, crcValid)) {
-            msg.hasChecksum  = true;
-            msg.checksumValid = crcValid;
+        if (JF8Checksum::tryStrip(rawStripped, crcValid) && crcValid) {
+            msg.hasChecksum   = true;
+            msg.checksumValid = true;
             msg.rawText = rawStripped;
             // Also strip from body (last word of body is the checksum)
             if (!msg.body.isEmpty()) {

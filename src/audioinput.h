@@ -9,6 +9,7 @@
 #include <vector>
 #include <mutex>
 #include <portaudio.h>
+#include <kissfft/kiss_fft.h>
 
 class AudioInput : public QObject {
     Q_OBJECT
@@ -89,6 +90,12 @@ private:
     int                  m_specTimer = 0;
     std::vector<float>   m_fftBuf;
     static constexpr int k_fftSize  = 2048;
+
+    // Pre-allocated FFT plan and working buffers — created once, reused every call
+    kiss_fft_cfg                   m_fftCfg  = nullptr;
+    std::vector<kiss_fft_cpx>      m_fftIn;
+    std::vector<kiss_fft_cpx>      m_fftOut;
+    std::vector<float>             m_fftMag;
 
     void buildFirFilter();
 };
