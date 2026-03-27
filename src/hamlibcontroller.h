@@ -13,16 +13,18 @@
 #endif
 
 struct RigConfig {
-    int     rigModel   = 1;
+    int     rigModel    = 1;
     QString port;
-    int     baudRate   = 9600;
-    int     dataBits   = 8;
-    int     stopBits   = 1;
-    int     parity     = 0;      // 0=None 1=Odd 2=Even
-    int     handshake  = 0;      // 0=None 1=XON/XOFF 2=Hardware
-    int     dtrState   = 0;      // 0=unset 1=on 2=off
-    int     rtsState   = 0;
-    int     pttType    = 0;      // 0=VOX/none 1=CAT 2=DTR 3=RTS
+    int     baudRate    = 9600;
+    int     dataBits    = 8;
+    int     stopBits    = 1;
+    int     parity      = 0;      // 0=None 1=Odd 2=Even
+    int     handshake   = 0;      // 0=None 1=XON/XOFF 2=Hardware
+    int     dtrState    = 0;      // 0=unset 1=on 2=off
+    int     rtsState    = 0;
+    int     pttType     = 0;      // 0=VOX/none 1=CAT 2=DTR 3=RTS
+    bool    emulatedSplit = false; // if true, TX freq ≠ RX freq via rapid VFO switch
+    double  txFreqKhz   = 0.0;   // TX dial freq for emulated split (0 = same as RX)
 };
 Q_DECLARE_METATYPE(RigConfig)
 
@@ -66,9 +68,12 @@ private:
 #endif
     std::atomic<bool> m_connected{false};
     QString m_lastError;
-    int  m_preMuteVolume     = -1;   // saved AF vol for volume-based mute fallback
-    int  m_pttType           = 0;
-    int  m_consecutiveErrors = 0;
+    int    m_preMuteVolume     = -1;   // saved AF vol for volume-based mute fallback
+    int    m_pttType           = 0;
+    int    m_consecutiveErrors = 0;
+    bool   m_emulatedSplit     = false;
+    double m_txFreqKhz         = 0.0;  // TX dial freq for emulated split
+    double m_rxFreqKhz         = 0.0;  // saved RX freq while transmitting
     static constexpr int k_maxConsecutiveErrors = 5;
     static constexpr int k_portTimeoutMs        = 2000;
 };

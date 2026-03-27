@@ -5,6 +5,7 @@
 #include <QMouseEvent>
 #include <cmath>
 #include <algorithm>
+#include <numeric>
 
 WaterfallWidget::WaterfallWidget(QWidget *parent)
     : QWidget(parent)
@@ -29,12 +30,41 @@ void WaterfallWidget::resizeEvent(QResizeEvent *)
     rebuildImage(width(), height());
 }
 
-// Map power in dB to a colour.
-// Range: -range dB (black) → 0 dB (red)
-QRgb WaterfallWidget::powerToColor(float db)
+void WaterfallWidget::setGain(float gainDb)
 {
-    // Normalise to [0, 1]
-    float t = std::clamp(db / 50.0f + 1.0f, 0.0f, 1.0f);
+    m_gain = std::clamp(gainDb, -30.0f, 30.0f);
+    update();
+}
+
+void WaterfallWidget::setDisplayMode(DisplayMode mode)
+{
+    if (m_displayMode != mode) {
+        m_displayMode = mode;
+        resetAverage();
+    }
+}
+
+void WaterfallWidget::setAverageCount(int n)
+{
+    m_avgWindow = std::max(1, n);
+    resetAverage();
+}
+
+void WaterfallWidget::resetAverage()
+{
+    m_avgAccum.clear();
+    m_avgCount = 0;
+    m_cumPeak.clear();
+}
+
+// Map power in dB (relative to peak, so ≤0) to a colour.
+// Range controlled by m_range and m_gain.
+QRgb WaterfallWidget::powerToColor(float db) const
+{
+    // Apply gain offset: positive gain makes small signals more visible
+    const float boosted = db + m_gain;
+    // Normalise: boosted=0 → t=1.0, boosted=-range → t=0.0
+    float t = std::clamp(boosted / m_range + 1.0f, 0.0f, 1.0f);
     // Colour map: black → navy → cyan → yellow → red
     if (t < 0.25f) {
         float u = t / 0.25f;
@@ -59,31 +89,69 @@ void WaterfallWidget::addLine(const std::vector<float> &magnitudes, float sample
     const int h = m_image.height();
     const int N = static_cast<int>(magnitudes.size());
 
-    // Target: full pane refreshes in 15 seconds at ~10 Hz input.
-    // Accumulate fractional lines; write one or more per call as needed.
+    // Build the spectrum to display based on the current mode
+    const std::vector<float> *display = &magnitudes;
+    std::vector<float> processed;
+
+    if (m_displayMode == LinearAverage) {
+        // Maintain running sum of last m_avgWindow spectra
+        if (m_avgAccum.size() != magnitudes.size()) {
+            m_avgAccum.assign(magnitudes.size(), 0.0f);
+            m_avgCount = 0;
+        }
+        // Rolling average: just accumulate and track count up to window
+        for (size_t i = 0; i < magnitudes.size(); ++i)
+            m_avgAccum[i] += magnitudes[i];
+        ++m_avgCount;
+        if (m_avgCount > m_avgWindow) {
+            // Subtract oldest estimate by subtracting the fractional excess
+            // (simplistic: just divide by count to normalize)
+        }
+        processed.resize(magnitudes.size());
+        const float denom = static_cast<float>(std::min(m_avgCount, m_avgWindow));
+        for (size_t i = 0; i < magnitudes.size(); ++i)
+            processed[i] = m_avgAccum[i] / denom;
+        // If we've exceeded the window, pull back the accumulator
+        if (m_avgCount >= m_avgWindow) {
+            const float scale = static_cast<float>(m_avgWindow - 1) / static_cast<float>(m_avgWindow);
+            for (float &v : m_avgAccum) v *= scale;
+            m_avgCount = m_avgWindow;
+        }
+        display = &processed;
+
+    } else if (m_displayMode == Cumulative) {
+        if (m_cumPeak.size() != magnitudes.size())
+            m_cumPeak.assign(magnitudes.size(), 0.0f);
+        for (size_t i = 0; i < magnitudes.size(); ++i)
+            m_cumPeak[i] = std::max(m_cumPeak[i], magnitudes[i]);
+        display = &m_cumPeak;
+    }
+    // else: Current mode — display = &magnitudes (set above)
+
+    // Rate control: target full-pane refresh in 15 s at ~10 Hz input
     const float linesPerCall = static_cast<float>(h) / (15.0f * 10.0f);
     m_lineAccum += linesPerCall;
     int linesToWrite = static_cast<int>(m_lineAccum);
-    if (linesToWrite < 1) linesToWrite = 1;   // always advance at least one pixel
+    if (linesToWrite < 1) linesToWrite = 1;
     m_lineAccum -= static_cast<float>(linesToWrite);
 
-    // Pre-render this spectrum into a pixel row
+    // Find peak for normalisation
     const float hzPerBin  = sampleRateHz / (2.0f * static_cast<float>(N));
     const float freqRange = m_highHz - m_lowHz;
     float peak = 1e-12f;
-    for (float v : magnitudes) peak = std::max(peak, v);
+    for (float v : *display) peak = std::max(peak, v);
 
+    // Render pixel row
     std::vector<QRgb> row(static_cast<size_t>(w));
     for (int x = 0; x < w; ++x) {
         const float hz  = m_lowHz + freqRange * static_cast<float>(x) / static_cast<float>(w);
         int bin = static_cast<int>(hz / hzPerBin);
         bin = std::clamp(bin, 0, N - 1);
-        const float db = 20.0f * std::log10(magnitudes[bin] / peak + 1e-12f);
+        const float db = 20.0f * std::log10((*display)[static_cast<size_t>(bin)] / peak + 1e-12f);
         row[static_cast<size_t>(x)] = powerToColor(db);
     }
 
-    // Write linesToWrite copies of the rendered row into the circular buffer.
-    // Decrement-first so m_scrollLine always points to the newest line (top of display).
+    // Write into circular image buffer
     for (int l = 0; l < linesToWrite; ++l) {
         m_scrollLine = (m_scrollLine - 1 + h) % h;
         QRgb *dst = reinterpret_cast<QRgb *>(m_image.scanLine(m_scrollLine));
@@ -102,18 +170,12 @@ void WaterfallWidget::paintEvent(QPaintEvent *)
     if (m_image.isNull() || m_image.width() != w || m_image.height() != h)
         rebuildImage(w, h);
 
-    // Scroll downward: newest line at top, oldest at bottom.
-    // m_scrollLine always points to the newest line.
-    // Newest slot: m_scrollLine     → screen y=0
-    // Oldest slot: m_scrollLine-1   → screen y=h-1
     const int sl = m_scrollLine;
     if (sl == 0) {
         p.drawImage(0, 0, m_image);
     } else {
-        // Newest part: image[sl..h-1] → screen top
         const int newH = h - sl;
         p.drawImage(QRect(0, 0, w, newH), m_image, QRect(0, sl, w, newH));
-        // Oldest part: image[0..sl-1] → screen bottom
         p.drawImage(QRect(0, newH, w, sl), m_image, QRect(0, 0, w, sl));
     }
 
@@ -127,14 +189,33 @@ void WaterfallWidget::paintEvent(QPaintEvent *)
         int x = static_cast<int>((hz - m_lowHz) / freqRange * w);
         const QString label = QStringLiteral("%1").arg(static_cast<int>(hz));
         const int textW = fm.horizontalAdvance(label);
-        // Black background behind tick + label
         p.fillRect(x - 1, 0, textW + 6, fm.height() + 3, Qt::black);
         p.setPen(QColor(0xc9, 0xa8, 0x4c));  // amber
         p.drawLine(x, 0, x, 5);
         p.drawText(x + 2, 3 + fm.ascent(), label);
     }
 
-    // TX frequency marker — white line with black flanking lines for contrast
+    // Gain indicator (shown when gain != 0)
+    if (std::abs(m_gain) > 0.5f) {
+        const QString gainStr = (m_gain > 0 ? QStringLiteral("+") : QString())
+                                + QString::number(static_cast<int>(m_gain)) + QStringLiteral("dB");
+        const int textW = fm.horizontalAdvance(gainStr) + 6;
+        p.fillRect(w - textW - 4, 0, textW + 4, fm.height() + 3, QColor(0x1a, 0x1a, 0x2e));
+        p.setPen(QColor(0xc9, 0xa8, 0x4c));
+        p.drawText(w - textW, 3 + fm.ascent(), gainStr);
+    }
+
+    // Mode indicator
+    if (m_displayMode != Current) {
+        const QString modeStr = (m_displayMode == LinearAverage)
+                                ? QStringLiteral("AVG") : QStringLiteral("CUM");
+        const int textW = fm.horizontalAdvance(modeStr) + 6;
+        p.fillRect(4, 0, textW, fm.height() + 3, QColor(0x1a, 0x1a, 0x2e));
+        p.setPen(QColor(0x7f, 0xbf, 0x7f));
+        p.drawText(7, 3 + fm.ascent(), modeStr);
+    }
+
+    // TX frequency marker
     {
         float hz = m_txFreqHz;
         if (hz >= m_lowHz && hz <= m_highHz) {

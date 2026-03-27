@@ -5,7 +5,71 @@
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonArray>
 #include <QStandardPaths>
+
+// ── BandEntry serialisation ──────────────────────────────────────────────────
+
+QJsonObject BandEntry::toJson() const
+{
+    QJsonObject o;
+    o[u"name"]     = name;
+    o[u"freqKhz"]  = freqKhz;
+    o[u"txFreqHz"] = txFreqHz;
+    return o;
+}
+
+BandEntry BandEntry::fromJson(const QJsonObject &o)
+{
+    BandEntry e;
+    e.name     = o.value(u"name").toString();
+    e.freqKhz  = o.value(u"freqKhz").toDouble(14078.0);
+    e.txFreqHz = o.value(u"txFreqHz").toDouble(1500.0);
+    return e;
+}
+
+QList<BandEntry> defaultBandList()
+{
+    return {
+        { QStringLiteral("160m"),  1840.0, 1500.0 },
+        { QStringLiteral("80m"),   3578.0, 1500.0 },
+        { QStringLiteral("60m"),   5357.0, 1500.0 },
+        { QStringLiteral("40m"),   7078.0, 1500.0 },
+        { QStringLiteral("30m"), 10130.0,  1500.0 },
+        { QStringLiteral("20m"), 14078.0,  1500.0 },
+        { QStringLiteral("17m"), 18104.0,  1500.0 },
+        { QStringLiteral("15m"), 21078.0,  1500.0 },
+        { QStringLiteral("12m"), 24922.0,  1500.0 },
+        { QStringLiteral("10m"), 28078.0,  1500.0 },
+        { QStringLiteral("6m"),  50318.0,  1500.0 },
+    };
+}
+
+// ── FreqScheduleEntry serialisation ─────────────────────────────────────────
+
+QJsonObject FreqScheduleEntry::toJson() const
+{
+    QJsonObject o;
+    o[u"enabled"]   = enabled;
+    o[u"utcHhmm"]   = utcHhmm;
+    o[u"dayMask"]   = static_cast<int>(dayMask);
+    o[u"freqKhz"]   = freqKhz;
+    o[u"txFreqHz"]  = txFreqHz;
+    o[u"label"]     = label;
+    return o;
+}
+
+FreqScheduleEntry FreqScheduleEntry::fromJson(const QJsonObject &o)
+{
+    FreqScheduleEntry e;
+    e.enabled  = o.value(u"enabled").toBool(true);
+    e.utcHhmm  = o.value(u"utcHhmm").toInt(0);
+    e.dayMask  = static_cast<quint8>(o.value(u"dayMask").toInt(0x7F));
+    e.freqKhz  = o.value(u"freqKhz").toDouble(14078.0);
+    e.txFreqHz = o.value(u"txFreqHz").toDouble(1500.0);
+    e.label    = o.value(u"label").toString();
+    return e;
+}
 
 static QString configDir()
 {
@@ -50,8 +114,10 @@ Config Config::load()
     c.stationInfo               = o.value(u"stationInfo").toString();
     c.stationStatus             = o.value(u"stationStatus").toString();
     c.cqMessage                 = o.value(u"cqMessage").toString();
-    c.heartbeatEnabled          = o.value(u"heartbeatEnabled").toBool(true);
-    c.heartbeatIntervalPeriods  = o.value(u"heartbeatIntervalPeriods").toInt(4);
+    c.heartbeatEnabled          = o.value(u"heartbeatEnabled").toBool(false);
+    c.heartbeatIntervalMins     = o.value(u"heartbeatIntervalMins").toInt(10);
+    c.heartbeatSubChannel       = o.value(u"heartbeatSubChannel").toBool(true);
+    c.txEnabled                 = o.value(u"txEnabled").toBool(true);
     c.autoReply                 = o.value(u"autoReply").toBool(true);
     c.distMiles                 = o.value(u"distMiles").toBool(true);
     c.autoAtu                   = o.value(u"autoAtu").toBool(false);
@@ -69,6 +135,24 @@ Config Config::load()
     c.wsEnabled                 = o.value(u"wsEnabled").toBool(true);
     c.wsPort                    = o.value(u"wsPort").toInt(2102);
     c.wsHost                    = o.value(u"wsHost").toString(QStringLiteral("127.0.0.1"));
+    c.emulatedSplit             = o.value(u"emulatedSplit").toBool(false);
+    c.relayServerEnabled        = o.value(u"relayServerEnabled").toBool(false);
+    c.relayServerPort           = o.value(u"relayServerPort").toInt(2442);
+    c.relayServerLocalhostOnly  = o.value(u"relayServerLocalhostOnly").toBool(true);
+    c.qsoLogEnabled             = o.value(u"qsoLogEnabled").toBool(true);
+    c.aprsEnabled               = o.value(u"aprsEnabled").toBool(false);
+    c.aprsHost                  = o.value(u"aprsHost").toString(QStringLiteral("rotate.aprs.net"));
+    c.aprsPort                  = o.value(u"aprsPort").toInt(14580);
+    c.aprsFilter                = o.value(u"aprsFilter").toString();
+    c.solarEnabled              = o.value(u"solarEnabled").toBool(true);
+    c.infoMaxAgeMins            = o.value(u"infoMaxAgeMins").toInt(30);
+    c.heardMaxAgeMins           = o.value(u"heardMaxAgeMins").toInt(30);
+    c.waterfallGain             = static_cast<float>(o.value(u"waterfallGain").toDouble(0.0));
+    c.waterfallMode             = o.value(u"waterfallMode").toInt(0);
+    for (const QJsonValue &v : o.value(u"bandList").toArray())
+        c.bandList.append(BandEntry::fromJson(v.toObject()));
+    for (const QJsonValue &v : o.value(u"freqSchedule").toArray())
+        c.freqSchedule.append(FreqScheduleEntry::fromJson(v.toObject()));
     c.windowGeometry = QByteArray::fromBase64(
         o.value(u"windowGeometry").toString().toLatin1());
     c.windowState = QByteArray::fromBase64(
@@ -97,7 +181,9 @@ void Config::save() const
     o[u"stationStatus"]            = stationStatus;
     o[u"cqMessage"]                = cqMessage;
     o[u"heartbeatEnabled"]         = heartbeatEnabled;
-    o[u"heartbeatIntervalPeriods"] = heartbeatIntervalPeriods;
+    o[u"heartbeatIntervalMins"]    = heartbeatIntervalMins;
+    o[u"heartbeatSubChannel"]      = heartbeatSubChannel;
+    o[u"txEnabled"]                = txEnabled;
     o[u"autoReply"]                = autoReply;
     o[u"distMiles"]                = distMiles;
     o[u"autoAtu"]                  = autoAtu;
@@ -115,6 +201,32 @@ void Config::save() const
     o[u"wsEnabled"]                = wsEnabled;
     o[u"wsPort"]                   = wsPort;
     o[u"wsHost"]                   = wsHost;
+    o[u"emulatedSplit"]            = emulatedSplit;
+    o[u"relayServerEnabled"]       = relayServerEnabled;
+    o[u"relayServerPort"]          = relayServerPort;
+    o[u"relayServerLocalhostOnly"] = relayServerLocalhostOnly;
+    o[u"qsoLogEnabled"]            = qsoLogEnabled;
+    o[u"aprsEnabled"]              = aprsEnabled;
+    o[u"aprsHost"]                 = aprsHost;
+    o[u"aprsPort"]                 = aprsPort;
+    o[u"aprsFilter"]               = aprsFilter;
+    o[u"solarEnabled"]             = solarEnabled;
+    o[u"infoMaxAgeMins"]           = infoMaxAgeMins;
+    o[u"heardMaxAgeMins"]          = heardMaxAgeMins;
+    o[u"waterfallGain"]            = static_cast<double>(waterfallGain);
+    o[u"waterfallMode"]            = waterfallMode;
+    {
+        QJsonArray arr;
+        for (const BandEntry &e : bandList)
+            arr.append(e.toJson());
+        o[u"bandList"] = arr;
+    }
+    {
+        QJsonArray arr;
+        for (const FreqScheduleEntry &e : freqSchedule)
+            arr.append(e.toJson());
+        o[u"freqSchedule"] = arr;
+    }
     o[u"windowGeometry"]           = QString::fromLatin1(windowGeometry.toBase64());
     o[u"windowState"]              = QString::fromLatin1(windowState.toBase64());
     o[u"vSplitterState"]           = QString::fromLatin1(vSplitterState.toBase64());

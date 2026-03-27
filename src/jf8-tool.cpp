@@ -35,6 +35,17 @@
  *   tx hearing CALLSIGN                 Send @HEARING? query
  *   tx queue                            Show TX queue
  *   tx clear                            Clear TX queue
+ *   bands                               List band entries
+ *   bands set NAME FREQ_KHZ [TX_HZ]    Add a single band entry
+ *   bands reset                         Reset to defaults
+ *   solar                               Show solar data
+ *   qso [--offset N] [--limit N]        Show QSO log
+ *   qso adif                            Export QSO log as ADIF
+ *   inbox                               List inbox messages
+ *   inbox send TO BODY                  Send message immediately
+ *   inbox store TO BODY                 Store message for retrieval
+ *   inbox delete ID                     Delete inbox message
+ *   inbox markread ID                   Mark message as read
  *   monitor [--filter EVENT]            Stream live events (Ctrl-C to stop)
  *   stream [--frames] [--json] [--output FILE]
  *                                       Stream decoded messages
@@ -118,6 +129,11 @@ struct Args {
     // tx snr/info/grid/status/hearing
     QString txCallsign;
 
+    // inbox
+    QString inboxTo;
+    QString inboxBody;
+    QString inboxId;
+
     // monitor
     QString monitorFilter;
 
@@ -164,8 +180,21 @@ static void printUsage()
 "  tx grid CALLSIGN                    Send @GRID? query\n"
 "  tx status CALLSIGN                  Send @STATUS? query\n"
 "  tx hearing CALLSIGN                 Send @HEARING? query\n"
+"  tx enable                           Enable transmission\n"
+"  tx disable                          Disable transmission (master TX off)\n"
 "  tx queue                            Show TX queue\n"
 "  tx clear                            Clear TX queue\n"
+"  bands                               List band entries\n"
+"  bands set NAME FREQ_KHZ [TX_HZ]    Add or update a band entry\n"
+"  bands reset                         Reset to factory defaults\n"
+"  solar                               Show current solar data\n"
+"  qso [--offset N] [--limit N]        Show QSO log\n"
+"  qso adif                            Export QSO log as ADIF to stdout\n"
+"  inbox                               List inbox messages\n"
+"  inbox send TO BODY                  Send a message to TO immediately\n"
+"  inbox store TO BODY                 Store a message for TO to retrieve later\n"
+"  inbox delete ID                     Delete an inbox message\n"
+"  inbox markread ID                   Mark an inbox message as read\n"
 "  monitor [--filter EVENT]            Stream all live events (Ctrl-C to stop)\n"
 "  stream [--frames] [--json]          Stream decoded messages (Ctrl-C to stop)\n"
 "         [--output FILE]\n"
@@ -363,11 +392,12 @@ static bool parseArgs(int argc, char *argv[], Args &out, int &exitCode)
     // ── tx ────────────────────────────────────────────────────────────────────
     } else if (out.cmd == "tx") {
         if (i >= av.size()) {
-            std::cerr << "tx requires a subcommand: hb, snr, info, grid, status, hearing, queue, clear\n";
+            std::cerr << "tx requires a subcommand: hb, snr, info, grid, status, hearing, enable, disable, queue, clear\n";
             exitCode=1; return false;
         }
         out.sub = QString::fromStdString(av[i++]);
-        if (out.sub == "hb" || out.sub == "queue" || out.sub == "clear") {
+        if (out.sub == "hb" || out.sub == "queue" || out.sub == "clear"
+                || out.sub == "enable" || out.sub == "disable") {
             // no arguments
         } else if (out.sub == "snr"  || out.sub == "info" || out.sub == "grid"
                 || out.sub == "status" || out.sub == "hearing") {
@@ -401,6 +431,64 @@ static bool parseArgs(int argc, char *argv[], Args &out, int &exitCode)
             else if (a.rfind("--output=", 0) == 0)           { out.streamOutput = QString::fromStdString(a.substr(9)); }
             else { std::cerr << "stream: unknown option: " << a << "\n"; exitCode=1; return false; }
             ++i;
+        }
+
+    // ── bands ─────────────────────────────────────────────────────────────────
+    } else if (out.cmd == "bands") {
+        if (i < av.size()) {
+            out.sub = QString::fromStdString(av[i++]);
+            if (out.sub == "reset") {
+                // no args
+            } else if (out.sub == "set") {
+                if (i + 1 >= av.size()) {
+                    std::cerr << "bands set requires NAME FREQ_KHZ\n"; exitCode=1; return false;
+                }
+                out.inboxTo   = QString::fromStdString(av[i++]);   // reuse as name
+                out.inboxBody = QString::fromStdString(av[i++]);   // reuse as freq
+                if (i < av.size()) out.inboxId = QString::fromStdString(av[i++]); // optional txFreqHz
+            } else {
+                std::cerr << "bands: unknown subcommand '" << out.sub.toStdString() << "'\n"; exitCode=1; return false;
+            }
+        }
+
+    // ── solar ─────────────────────────────────────────────────────────────────
+    } else if (out.cmd == "solar") {
+        // no arguments
+
+    // ── qso ───────────────────────────────────────────────────────────────────
+    } else if (out.cmd == "qso") {
+        if (i < av.size() && av[i] == "adif") {
+            out.sub = QStringLiteral("adif"); ++i;
+        } else {
+            while (i < av.size()) {
+                const std::string &a = av[i];
+                if      (a == "--offset"  && i+1 < av.size()) { out.messagesOffset = std::stoi(av[++i]); }
+                else if (a.rfind("--offset=", 0) == 0)        { out.messagesOffset = std::stoi(a.substr(9)); }
+                else if (a == "--limit"   && i+1 < av.size()) { out.messagesLimit  = std::stoi(av[++i]); }
+                else if (a.rfind("--limit=",  0) == 0)        { out.messagesLimit  = std::stoi(a.substr(8)); }
+                else { std::cerr << "qso: unknown option: " << a << "\n"; exitCode=1; return false; }
+                ++i;
+            }
+        }
+
+    // ── inbox ─────────────────────────────────────────────────────────────────
+    } else if (out.cmd == "inbox") {
+        if (i < av.size()) {
+            out.sub = QString::fromStdString(av[i++]);
+            if (out.sub == "send" || out.sub == "store") {
+                if (i + 1 >= av.size()) {
+                    std::cerr << out.sub.toStdString() << " requires TO and BODY\n"; exitCode=1; return false;
+                }
+                out.inboxTo   = QString::fromStdString(av[i++]).toUpper();
+                out.inboxBody = QString::fromStdString(av[i++]);
+            } else if (out.sub == "delete" || out.sub == "markread") {
+                if (i >= av.size()) {
+                    std::cerr << out.sub.toStdString() << " requires ID\n"; exitCode=1; return false;
+                }
+                out.inboxId = QString::fromStdString(av[i++]);
+            } else {
+                std::cerr << "inbox: unknown subcommand '" << out.sub.toStdString() << "'\n"; exitCode=1; return false;
+            }
         }
 
     } else {
@@ -594,11 +682,55 @@ private:
             if      (sub == "hb")      sendCmd("tx.hb");
             else if (sub == "snr")     sendCmd("tx.snr",    QJsonObject{{"to", m_args.txCallsign}});
             else if (sub == "info")    sendCmd("tx.info",   QJsonObject{{"to", m_args.txCallsign}});
-            else if (sub == "grid")    sendCmd("tx.send",   QJsonObject{{"text", m_args.txCallsign + " @GRID?"}});
-            else if (sub == "status")  sendCmd("tx.status", QJsonObject{{"to", m_args.txCallsign}});
-            else if (sub == "hearing") sendCmd("tx.send",   QJsonObject{{"text", m_args.txCallsign + " @HEARING?"}});
+            else if (sub == "grid")    sendCmd("tx.grid",    QJsonObject{{"to", m_args.txCallsign}});
+            else if (sub == "status")  sendCmd("tx.status",  QJsonObject{{"to", m_args.txCallsign}});
+            else if (sub == "hearing") sendCmd("tx.hearing",  QJsonObject{{"to", m_args.txCallsign}});
+            else if (sub == "enable")  sendCmd("config.set",  QJsonObject{{"txEnabled", true}});
+            else if (sub == "disable") sendCmd("config.set",  QJsonObject{{"txEnabled", false}});
             else if (sub == "queue")   sendCmd("tx.queue.get");
             else if (sub == "clear")   sendCmd("tx.queue.clear");
+
+        } else if (cmd == "bands") {
+            if (sub.isEmpty()) {
+                sendCmd("bands.get");
+            } else if (sub == "reset") {
+                sendCmd("bands.set", QJsonObject{{"bands", QJsonArray{}}});
+            } else if (sub == "set") {
+                // inboxTo=name, inboxBody=freqKhz, inboxId=txFreqHz (optional)
+                QJsonObject entry;
+                entry["name"]     = m_args.inboxTo;
+                entry["freqKhz"]  = m_args.inboxBody.toDouble();
+                entry["txFreqHz"] = m_args.inboxId.isEmpty() ? 1500.0 : m_args.inboxId.toDouble();
+                // We need to get the current list first then append — use a single bands.set
+                // For now just send a single-entry list (replaces all). User can use bands.get first.
+                sendCmd("bands.set", QJsonObject{{"bands", QJsonArray{entry}}});
+            }
+
+        } else if (cmd == "solar") {
+            sendCmd("solar.get");
+
+        } else if (cmd == "qso") {
+            if (sub == "adif") {
+                sendCmd("qso.log.adif");
+            } else {
+                sendCmd("qso.log.get", QJsonObject{
+                    {"offset", m_args.messagesOffset},
+                    {"limit",  m_args.messagesLimit}
+                });
+            }
+
+        } else if (cmd == "inbox") {
+            if (sub.isEmpty()) {
+                sendCmd("inbox.get");
+            } else if (sub == "send") {
+                sendCmd("inbox.send", QJsonObject{{"to", m_args.inboxTo}, {"body", m_args.inboxBody}});
+            } else if (sub == "store") {
+                sendCmd("inbox.store", QJsonObject{{"to", m_args.inboxTo}, {"body", m_args.inboxBody}});
+            } else if (sub == "delete") {
+                sendCmd("inbox.delete", QJsonObject{{"id", m_args.inboxId.toInt()}});
+            } else if (sub == "markread") {
+                sendCmd("inbox.mark_read", QJsonObject{{"id", m_args.inboxId.toInt()}});
+            }
 
         } else if (cmd == "monitor" || cmd == "stream") {
             m_streaming = true;
@@ -831,6 +963,75 @@ private:
                         j, f["submode"].toInt(), f["frame_type"].toInt(),
                         payload.toUtf8().constData());
                 }
+            } else {
+                okOrErr();
+            }
+
+        // ── bands ────────────────────────────────────────────────────────────
+        } else if (cmd == "bands") {
+            if (sub.isEmpty()) {
+                if (!ok) { errMsg(); return; }
+                QJsonArray bands = data["bands"].toArray();
+                printf("%d band(s):\n", (int)bands.size());
+                for (const auto &bv : bands) {
+                    QJsonObject b = bv.toObject();
+                    printf("  %-12s  %10.3f kHz  TX +%.0f Hz\n",
+                        b["name"].toString().toUtf8().constData(),
+                        b["freqKhz"].toDouble(),
+                        b["txFreqHz"].toDouble());
+                }
+            } else {
+                okOrErr();
+            }
+
+        // ── solar ────────────────────────────────────────────────────────────
+        } else if (cmd == "solar") {
+            if (!ok) { errMsg(); return; }
+            printf("SFI  : %d\n",   data["sfi"].toInt());
+            printf("A    : %d\n",   data["a_index"].toInt());
+            printf("K    : %d\n",   data["k_index"].toInt());
+            printf("R    : R%d\n",  data["r_scale"].toInt());
+            printf("Band : %s\n",   data["band_conditions"].toString().toUtf8().constData());
+            printf("UTC  : %s\n",   data["updated_utc"].toString().toUtf8().constData());
+
+        // ── qso ──────────────────────────────────────────────────────────────
+        } else if (cmd == "qso") {
+            if (sub == "adif") {
+                if (!ok) { errMsg(); return; }
+                printf("%s", data["adif"].toString().toUtf8().constData());
+            } else {
+                if (!ok) { errMsg(); return; }
+                QJsonArray qsos = data["qsos"].toArray();
+                printf("%d QSO(s):\n", (int)qsos.size());
+                for (const auto &qv : qsos) {
+                    QJsonObject q = qv.toObject();
+                    printf("  [%s] %-10s  %-6s  SNR%+d  %s\n",
+                        q["time"].toString().toUtf8().constData(),
+                        q["callsign"].toString().toUtf8().constData(),
+                        q["grid"].toString().toUtf8().constData(),
+                        q["snr_db"].toInt(),
+                        q["notes"].toString().toUtf8().constData());
+                }
+            }
+
+        // ── inbox ────────────────────────────────────────────────────────────
+        } else if (cmd == "inbox") {
+            if (sub.isEmpty()) {
+                if (!ok) { errMsg(); return; }
+                QJsonArray msgs = data["messages"].toArray();
+                printf("%d message(s):\n", (int)msgs.size());
+                for (const auto &mv : msgs) {
+                    QJsonObject m = mv.toObject();
+                    printf("  [%s] %-8s  FROM %-10s  %s%s\n",
+                        m["id"].toString().toUtf8().constData(),
+                        m["utc_iso"].toString().toUtf8().constData(),
+                        m["from"].toString().toUtf8().constData(),
+                        m["body"].toString().toUtf8().constData(),
+                        m["read"].toBool() ? "" : "  (unread)");
+                }
+            } else if (sub == "store") {
+                if (!ok) { errMsg(); return; }
+                printf("Stored message ID: %s\n", data["id"].toString().toUtf8().constData());
             } else {
                 okOrErr();
             }

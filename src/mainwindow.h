@@ -24,6 +24,8 @@
 #include "updatechecker.h"
 #include "imodem.h"
 #include "js8message.h"
+#include "solardata.h"
+#include "freqschedule.h"
 
 class MessageModel;
 class WaterfallWidget;
@@ -32,6 +34,10 @@ class AudioOutput;
 class PeriodClock;
 class WsServer;
 class PskReporter;
+class RelayServer;
+class AprsClient;
+class QsoLog;
+class QSlider;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -62,7 +68,9 @@ public:
     void apiSetFrequencyKhz(double khz);
     void apiSetTxFreqHz(double hz);
     void apiSetHeartbeatEnabled(bool v);
-    void apiSetHeartbeatInterval(int periods);
+    void apiSetHeartbeatIntervalMins(int mins);
+    void apiSetHeartbeatSubChannel(bool v);
+    void apiSetTxEnabled(bool v);
     void apiSetAutoReply(bool v);
     void apiSetStationInfo(const QString &s);
     void apiSetStationStatus(const QString &s);
@@ -70,6 +78,8 @@ public:
     void apiSetDistMiles(bool miles);
     void apiSetAutoAtu(bool v);
     void apiSetPskReporterEnabled(bool v);
+    void apiSetInfoMaxAgeMins(int mins);
+    void apiSetHeardMaxAgeMins(int mins);
     void apiSetAudioInput(const QString &name);
     void apiSetAudioOutput(const QString &name);
     void apiSetRigConfig(const RigConfig &cfg);
@@ -92,6 +102,23 @@ public:
     int  apiGetMute(QString *err = nullptr)        const;
     bool apiSetMute(bool muted, QString *err = nullptr);
     void apiClearMessages();
+
+    // QSO logging
+    void apiLogQso(const QString &callsign, const QString &grid,
+                   int snrDb, const QString &notes = QString());
+    QJsonArray apiGetQsoLog(int offset = 0, int limit = 100) const;
+    QString apiExportAdif() const;
+
+    // Solar data
+    QJsonObject apiGetSolarData() const;
+
+    // Frequency schedule
+    void apiSetFreqSchedule(const QList<FreqScheduleEntry> &schedule);
+    QJsonArray apiGetFreqSchedule() const;
+
+    // Band list
+    void apiSetBandList(const QList<BandEntry> &bands);
+    QJsonArray apiGetBandList() const;
 
 protected:
     void closeEvent(QCloseEvent *) override;
@@ -123,6 +150,7 @@ private slots:
     void onHaltClicked();
     void onInfoTableClicked(const QModelIndex &index);
     void onDeselectClicked();
+    void onAllClicked();
     void onMsgBtnClicked();
     void onOpenInbox();
     void updateInboxNotification();
@@ -135,6 +163,28 @@ private slots:
     void onHeartbeatCheck();
     void startupChecks();
     void onFrameCleanupTimer();
+    void onFreqScheduleCheck();
+    void onHeardAgeTimer();
+
+    // Helpers
+    void rebuildHeardPane();
+
+    // Solar data
+    void onSolarDataUpdated(const SolarData &data);
+
+    // Band selector
+    void onBandSelected(int index);
+
+    // Schedule / QSO UI
+    void onFreqScheduleEdit();
+    void onQsoLogOpen();
+    void onQsoLogAdifExport();
+
+    // Band list editor
+    void onBandListEdit();
+
+    // Clock tick
+    void onClockTick();
 
     // Auto-reply
     void sendAutoReply(const QString &toCall, const QString &body, int snrDb);
@@ -157,9 +207,15 @@ private:
     void setupCentralWidget();
     void setupStatusBar();
     void applyStyleSheet();
+    void populateBandCombo();
     void startAudio();
+    void saveInfoPane();
+    void saveHeardPane();
+    void loadInfoPane();
+    void loadHeardPane();
     void stopAudio();
     void transmitMessage(const QString &text, const QString &gridOverride = QString());
+    void sendHeartbeat();
     void transmitNextFrame();          // shared TX path for period-based and streaming
     void refreshSubmodeCombo();        // repopulate m_submodeCbo from active modem
     void restartDecodeWorker();        // recreate decode thread+worker for active modem type
@@ -225,6 +281,9 @@ private:
     QDoubleSpinBox *m_txFreqSpin;
     QPushButton    *m_connectBtn;
     QCheckBox      *m_hbCheck;
+    QCheckBox      *m_txCheck     = nullptr;   // master TX enable
+    QLabel         *m_hbCountdown = nullptr;   // HB timer countdown label
+    int             m_hbSecsRemaining = 0;     // seconds until next HB transmission
 
     // TX input area
     QLineEdit   *m_txEdit;
@@ -238,6 +297,7 @@ private:
     QPushButton *m_cqBtn        = nullptr;
     QPushButton *m_haltBtn      = nullptr;
     QPushButton *m_deselectBtn  = nullptr;
+    QPushButton *m_allBtn       = nullptr;
     QPushButton *m_msgBtn       = nullptr;
     QPushButton *m_inboxNotifyBtn = nullptr;
 
@@ -253,13 +313,43 @@ private:
     // Update notification bar (shown when a newer version is detected)
     QFrame *m_updateBar = nullptr;
 
+    // Solar data
+    SolarDataFetcher *m_solarFetcher = nullptr;
+    SolarData         m_solarData;
+    QLabel           *m_solarLabel   = nullptr;
+
+    // Relay server
+    RelayServer *m_relayServer = nullptr;
+
+    // APRS-IS client
+    AprsClient  *m_aprsClient  = nullptr;
+
+    // Band combo (toolbar)
+    QComboBox *m_bandCombo = nullptr;
+
+    // Clock labels (top-right of toolbar)
+    QLabel    *m_utcClockLabel = nullptr;
+    QLabel    *m_lclClockLabel = nullptr;
+    QTimer    *m_clockTimer    = nullptr;
+
+    // Waterfall controls
+    QSlider   *m_gainSlider      = nullptr;
+    QComboBox *m_wfModeCbo       = nullptr;
+
+    // Frequency schedule timer
+    QTimer    *m_freqScheduleTimer = nullptr;
+    int        m_lastScheduledHhmm = -1;  // to avoid double-firing
+
     // Status bar
     QLabel *m_radioStatusLabel;
     QLabel *m_rxTxLabel;
     QLabel *m_countLabel;
     int     m_decodeCount = 0;
-    QHash<int, int>     m_heardFreqBlock;   // rounded freq (Hz/10) → document block index
-    QHash<QString, qint64> m_recentDecodes; // msgKey → epoch_sec, cross-period dedup
+    struct HeardEntry { QString text; QDateTime lastUpdate; };
+    QHash<int, HeardEntry>  m_heardFreqBlock;  // rounded freq (Hz/10) → entry
+    QTimer                 *m_heardAgeTimer = nullptr;
+    QHash<QString, qint64> m_recentDecodes;     // msgKey → epoch_sec, cross-period dedup
+    QHash<QString, qint64> m_lastRelayNotify;  // callsign → epoch_sec, throttle relay pings
 
     // GFSK8 multi-frame assembly buffer.
     // Keyed by round(freqHz/10); holds accumulated rawText across frame periods.

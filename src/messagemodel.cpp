@@ -16,16 +16,28 @@ MessageModel::MessageModel(QObject *parent)
     m_ageTimer->setInterval(1000);
     connect(m_ageTimer, &QTimer::timeout, this, [this]() {
         if (m_messages.isEmpty()) return;
-        // +1 because row 0 is @ALL; real messages start at row 1
-        emit dataChanged(index(1, ColAge), index(m_messages.size(), ColAge),
-                         {Qt::DisplayRole, Qt::UserRole});
+
+        // Expire rows older than maxAgeMins
+        const qint64 maxSecs = static_cast<qint64>(m_maxAgeMins) * 60;
+        const QDateTime now  = QDateTime::currentDateTimeUtc();
+        for (int i = m_messages.size() - 1; i >= 0; --i) {
+            if (m_messages[i].utc.secsTo(now) > maxSecs) {
+                beginRemoveRows({}, i, i);
+                m_messages.removeAt(i);
+                endRemoveRows();
+            }
+        }
+
+        if (!m_messages.isEmpty())
+            emit dataChanged(index(0, ColAge), index(m_messages.size() - 1, ColAge),
+                             {Qt::DisplayRole, Qt::UserRole});
     });
     m_ageTimer->start();
 }
 
 int MessageModel::rowCount(const QModelIndex &parent) const
 {
-    return parent.isValid() ? 0 : m_messages.size() + 1;   // +1 for @ALL
+    return parent.isValid() ? 0 : m_messages.size();
 }
 
 int MessageModel::columnCount(const QModelIndex &parent) const
@@ -37,23 +49,7 @@ QVariant MessageModel::data(const QModelIndex &index, int role) const
 {
     if (!index.isValid()) return {};
 
-    // ── Row 0: virtual @ALL entry ─────────────────────────────────────────
-    if (index.row() == 0) {
-        if (role == Qt::DisplayRole) {
-            if (index.column() == ColFrom)    return QStringLiteral("@ALL");
-            if (index.column() == ColMessage) return QStringLiteral("(broadcast — click to select)");
-            return {};
-        }
-        if (role == Qt::ForegroundRole)
-            return QBrush(QColor(0xc9, 0xa8, 0x4c));    // amber
-        if (role == Qt::FontRole) {
-            QFont f; f.setBold(true); return f;
-        }
-        return {};
-    }
-
-    // ── Rows 1+: real messages ────────────────────────────────────────────
-    const int msgIdx = index.row() - 1;
+    const int msgIdx = index.row();
     if (msgIdx >= m_messages.size()) return {};
     const JS8Message &msg = m_messages.at(msgIdx);
 
@@ -83,8 +79,6 @@ QVariant MessageModel::data(const QModelIndex &index, int role) const
                 return msg.submodeStr;
             case ColFrom:
                 return msg.from.isEmpty() ? QStringLiteral("?") : msg.from;
-            case ColMessage:
-                return msg.body.isEmpty() ? msg.rawText : msg.body;
             case ColGrid:
                 return msg.grid;
             case ColDist:
@@ -136,15 +130,9 @@ QVariant MessageModel::data(const QModelIndex &index, int role) const
         }
     }
 
-    if (role == Qt::FontRole && index.column() == ColMessage) {
-        if (msg.type == JS8Message::Type::DirectedMessage ||
-            msg.type == JS8Message::Type::MsgCommand ||
-            msg.type == JS8Message::Type::SnrQuery ||
-            msg.type == JS8Message::Type::InfoQuery) {
-            QFont f;
-            f.setBold(true);
-            return f;
-        }
+    if (role == Qt::BackgroundRole) {
+        if (msg.heardMe)
+            return QBrush(QColor(0x1a, 0x3a, 0x1a));  // dark green tint — station replied to us
     }
 
     return {};
@@ -161,7 +149,6 @@ QVariant MessageModel::headerData(int section, Qt::Orientation orientation, int 
         case ColSnr:     return QStringLiteral("SNR");
         case ColSubmode: return QStringLiteral("Mode");
         case ColFrom:    return QStringLiteral("From");
-        case ColMessage: return QStringLiteral("Message");
         case ColGrid:    return QStringLiteral("Grid");
         case ColDist:    return QStringLiteral("Dist");
         case ColBearing: return QStringLiteral("Bearing");
@@ -196,15 +183,48 @@ void MessageModel::sort(int column, Qt::SortOrder order)
     // Row 0 (@ALL) always stays at top — it's virtual, not in m_messages.
 }
 
+void MessageModel::setMaxAgeMins(int mins)
+{
+    m_maxAgeMins = qMax(1, mins);
+}
+
 void MessageModel::addMessage(const JS8Message &msg)
 {
-    // Insert at row 1 (after the @ALL row at row 0)
-    beginInsertRows({}, 1, 1);
+    // Don't show anonymous or hash-compressed callsigns (e.g. "<...>").
+    if (msg.from.isEmpty() || msg.from.startsWith(QLatin1Char('<'))) return;
+
+    // Upsert by callsign: if we've already heard this station, update its row.
+    if (!msg.from.isEmpty()) {
+        for (int i = 0; i < m_messages.size(); ++i) {
+            if (m_messages[i].from.toUpper() == msg.from.toUpper()) {
+                JS8Message &existing = m_messages[i];
+                existing.utc        = msg.utc;
+                existing.audioFreqHz = msg.audioFreqHz;
+                existing.snrDb      = msg.snrDb;
+                existing.submodeStr = msg.submodeStr;
+                existing.submodeEnum = msg.submodeEnum;
+                existing.type       = msg.type;
+                if (msg.heardMe) existing.heardMe = true;  // sticky: once set, never cleared
+                if (!msg.grid.isEmpty()) {
+                    existing.grid         = msg.grid;
+                    existing.gridFromCache = msg.gridFromCache;
+                    existing.distKm       = msg.distKm;
+                    existing.bearingDeg   = msg.bearingDeg;
+                }
+                emit dataChanged(index(i, 0), index(i, ColCount - 1));
+                sort(m_sortColumn, m_sortOrder);
+                return;
+            }
+        }
+    }
+
+    // New callsign — insert at row 0
+    beginInsertRows({}, 0, 0);
     m_messages.prepend(msg);
     endInsertRows();
 
     if (m_messages.size() > k_maxRows) {
-        beginRemoveRows({}, k_maxRows + 1, m_messages.size());
+        beginRemoveRows({}, k_maxRows, m_messages.size() - 1);
         m_messages.resize(k_maxRows);
         endRemoveRows();
     }
@@ -230,6 +250,6 @@ void MessageModel::setDistanceMiles(bool miles)
     if (m_distMiles == miles) return;
     m_distMiles = miles;
     if (!m_messages.isEmpty())
-        emit dataChanged(index(1, ColDist), index(m_messages.size(), ColDist));
+        emit dataChanged(index(0, ColDist), index(m_messages.size() - 1, ColDist));
     emit headerDataChanged(Qt::Horizontal, ColDist, ColDist);
 }
