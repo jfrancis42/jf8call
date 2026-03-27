@@ -31,6 +31,10 @@ struct JS8Message {
     // Grid origin
     bool       gridFromCache = false;  // grid was recalled from persistent cache, not heard live
 
+    // Set true when this station has explicitly replied to us (SNR/INFO/GRID/STATUS/HEARING reply
+    // or ACK addressed to our callsign). Used to highlight the row in the Info pane.
+    bool       heardMe = false;
+
     // Command classification
     enum class Type {
         Unknown,

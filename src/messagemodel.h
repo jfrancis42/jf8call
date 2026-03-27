@@ -10,7 +10,7 @@ class MessageModel : public QAbstractTableModel {
 public:
     // ColTo removed; row 0 is always the virtual @ALL entry.
     enum Column { ColAge=0, ColTime, ColFreq, ColSnr, ColSubmode, ColFrom,
-                  ColMessage, ColGrid, ColDist, ColBearing, ColCount };
+                  ColGrid, ColDist, ColBearing, ColCount };
 
     explicit MessageModel(QObject *parent = nullptr);
 
@@ -28,11 +28,13 @@ public:
 
     void clear();
     void setDistanceMiles(bool miles);
+    void setMaxAgeMins(int mins);
 
 private:
     static constexpr int k_maxRows = 1000;
     static constexpr double k_kmToMi = 0.621371;
-    bool m_distMiles = true;
+    bool m_distMiles  = true;
+    int  m_maxAgeMins = 30;
     QList<JS8Message> m_messages;  // newest at index 0 (model row 1)
     QTimer *m_ageTimer = nullptr;
     int  m_sortColumn = ColAge;

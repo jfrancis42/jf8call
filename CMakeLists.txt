@@ -15,7 +15,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
 # ── Qt6 ───────────────────────────────────────────────────────────────────────
-find_package(Qt6 REQUIRED COMPONENTS Core Widgets WebSockets Network)
+find_package(Qt6 REQUIRED COMPONENTS Core Widgets WebSockets Network Sql)
 
 # ── gfsk8modem ─────────────────────────────────────────────────────────────────
 # Location of the gfsk8modem source tree.
@@ -259,6 +259,10 @@ set(SOURCES
     src/periodclock.cpp
     src/updatechecker.cpp
     src/pskreporter.cpp
+    src/qsolog.cpp
+    src/solardata.cpp
+    src/relayserver.cpp
+    src/aprsclient.cpp
     src/mainwindow.cpp
     src/wsserver.cpp
     resources.qrc
@@ -298,6 +302,11 @@ set(HEADERS
     src/periodclock.h
     src/updatechecker.h
     src/pskreporter.h
+    src/qsolog.h
+    src/solardata.h
+    src/relayserver.h
+    src/aprsclient.h
+    src/freqschedule.h
     src/mainwindow.h
     src/wsserver.h
 )
@@ -325,6 +334,7 @@ target_link_libraries(jf8call PRIVATE
     Qt6::Widgets
     Qt6::WebSockets
     Qt6::Network
+    Qt6::Sql
     gfsk8modem
     ${KISSFFT_LIBRARIES}
     ${PORTAUDIO_LIBRARIES}

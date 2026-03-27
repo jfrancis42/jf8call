@@ -98,6 +98,20 @@ private:
     QJsonObject cmdTxSnrQuery(const QJsonObject &d);
     QJsonObject cmdTxInfoQuery(const QJsonObject &d);
     QJsonObject cmdTxStatusQuery(const QJsonObject &d);
+    QJsonObject cmdQsoLogGet(const QJsonObject &d);
+    QJsonObject cmdQsoLogAdif(const QJsonObject &d);
+    QJsonObject cmdSolarGet(const QJsonObject &d);
+    QJsonObject cmdFreqScheduleGet(const QJsonObject &d);
+    QJsonObject cmdFreqScheduleSet(const QJsonObject &d);
+    QJsonObject cmdInboxGet(const QJsonObject &d);
+    QJsonObject cmdInboxSend(const QJsonObject &d);
+    QJsonObject cmdInboxStore(const QJsonObject &d);
+    QJsonObject cmdInboxDelete(const QJsonObject &d);
+    QJsonObject cmdInboxMarkRead(const QJsonObject &d);
+    QJsonObject cmdBandsGet(const QJsonObject &d);
+    QJsonObject cmdBandsSet(const QJsonObject &d);
+    QJsonObject cmdTxGridQuery(const QJsonObject &d);
+    QJsonObject cmdTxHearingQuery(const QJsonObject &d);
 
     QJsonObject buildStatusObject() const;
     static QString messageTypeName(JS8Message::Type t);

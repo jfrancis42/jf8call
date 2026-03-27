@@ -8,11 +8,15 @@
 #include "audiooutput.h"
 #include "messagemodel.h"
 #include "js8message.h"
+#include "qsolog.h"
+#include "messageinbox.h"
+#include "freqschedule.h"
 
 #include <QTimer>
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonValue>
+#include <QUuid>
 // ── Construction ─────────────────────────────────────────────────────────────
 
 WsServer::WsServer(MainWindow *app, QObject *parent)
@@ -178,6 +182,20 @@ void WsServer::handleCommand(QWebSocket *client, const QJsonObject &msg)
         { QStringLiteral("tx.snr"),               &WsServer::cmdTxSnrQuery      },
         { QStringLiteral("tx.info"),              &WsServer::cmdTxInfoQuery     },
         { QStringLiteral("tx.status"),            &WsServer::cmdTxStatusQuery   },
+        { QStringLiteral("qso.log.get"),          &WsServer::cmdQsoLogGet       },
+        { QStringLiteral("qso.log.adif"),         &WsServer::cmdQsoLogAdif      },
+        { QStringLiteral("solar.get"),            &WsServer::cmdSolarGet        },
+        { QStringLiteral("freq.schedule.get"),    &WsServer::cmdFreqScheduleGet },
+        { QStringLiteral("freq.schedule.set"),    &WsServer::cmdFreqScheduleSet },
+        { QStringLiteral("inbox.get"),            &WsServer::cmdInboxGet        },
+        { QStringLiteral("inbox.send"),           &WsServer::cmdInboxSend       },
+        { QStringLiteral("inbox.store"),          &WsServer::cmdInboxStore      },
+        { QStringLiteral("inbox.delete"),         &WsServer::cmdInboxDelete     },
+        { QStringLiteral("inbox.mark_read"),      &WsServer::cmdInboxMarkRead   },
+        { QStringLiteral("bands.get"),            &WsServer::cmdBandsGet        },
+        { QStringLiteral("bands.set"),            &WsServer::cmdBandsSet        },
+        { QStringLiteral("tx.grid"),              &WsServer::cmdTxGridQuery     },
+        { QStringLiteral("tx.hearing"),           &WsServer::cmdTxHearingQuery  },
     };
 
     auto it = kHandlers.find(cmd);
@@ -238,18 +256,21 @@ void WsServer::broadcast(const QString &event, const QJsonObject &data)
 void WsServer::pushMessageDecoded(const JS8Message &msg)
 {
     QJsonObject d;
-    d[QStringLiteral("time")]     = msg.utc.toString(QStringLiteral("HH:mm:ss"));
-    d[QStringLiteral("utc_iso")]  = msg.utc.toString(Qt::ISODate);
-    d[QStringLiteral("freq_hz")]  = static_cast<double>(msg.audioFreqHz);
-    d[QStringLiteral("snr_db")]   = msg.snrDb;
-    d[QStringLiteral("submode")]  = msg.submodeEnum;
-    d[QStringLiteral("submode_name")] = msg.submodeStr;
-    d[QStringLiteral("from")]     = msg.from;
-    d[QStringLiteral("to")]       = msg.to;
-    d[QStringLiteral("body")]     = msg.body;
-    d[QStringLiteral("raw")]      = msg.rawText;
-    d[QStringLiteral("type")]     = static_cast<int>(msg.type);
-    d[QStringLiteral("type_name")] = messageTypeName(msg.type);
+    d[QStringLiteral("time")]          = msg.utc.toString(QStringLiteral("HH:mm:ss"));
+    d[QStringLiteral("utc_iso")]       = msg.utc.toString(Qt::ISODate);
+    d[QStringLiteral("dial_freq_khz")] = m_app->apiConfig().frequencyKhz;
+    d[QStringLiteral("freq_hz")]       = static_cast<double>(msg.audioFreqHz);
+    d[QStringLiteral("spot_freq_khz")] = m_app->apiConfig().frequencyKhz
+                                         + msg.audioFreqHz / 1000.0;
+    d[QStringLiteral("snr_db")]        = msg.snrDb;
+    d[QStringLiteral("submode")]       = msg.submodeEnum;
+    d[QStringLiteral("submode_name")]  = msg.submodeStr;
+    d[QStringLiteral("from")]          = msg.from;
+    d[QStringLiteral("to")]            = msg.to;
+    d[QStringLiteral("body")]          = msg.body;
+    d[QStringLiteral("raw")]           = msg.rawText;
+    d[QStringLiteral("type")]          = static_cast<int>(msg.type);
+    d[QStringLiteral("type_name")]     = messageTypeName(msg.type);
     broadcast(QStringLiteral("message.decoded"), d);
 }
 
@@ -260,7 +281,9 @@ void WsServer::pushMessageFrame(float freqHz, int snrDb, int submode, int modemT
     QJsonObject d;
     d[QStringLiteral("time")]           = utc.toString(QStringLiteral("HH:mm:ss"));
     d[QStringLiteral("utc_iso")]        = utc.toString(Qt::ISODate);
+    d[QStringLiteral("dial_freq_khz")]  = m_app->apiConfig().frequencyKhz;
     d[QStringLiteral("freq_hz")]        = static_cast<double>(freqHz);
+    d[QStringLiteral("spot_freq_khz")]  = m_app->apiConfig().frequencyKhz + freqHz / 1000.0;
     d[QStringLiteral("snr_db")]         = snrDb;
     d[QStringLiteral("submode")]        = submode;
     d[QStringLiteral("submode_name")]   = submodeName(submode, modemType);
@@ -295,11 +318,13 @@ QJsonObject WsServer::buildStatusObject() const
     d[QStringLiteral("radio_freq_khz")]            = m_app->apiRadioFreqKhz();
     d[QStringLiteral("radio_mode")]                = m_app->apiRadioMode();
     d[QStringLiteral("tx_queue_size")]             = m_app->apiTxQueueSize();
-    d[QStringLiteral("heartbeat_enabled")]         = c.heartbeatEnabled;
-    d[QStringLiteral("heartbeat_interval_periods")]= c.heartbeatIntervalPeriods;
-    d[QStringLiteral("auto_reply")]                = c.autoReply;
-    d[QStringLiteral("ws_port")]                   = static_cast<int>(port());
-    d[QStringLiteral("ws_clients")]                = m_clients.size();
+    d[QStringLiteral("heartbeat_enabled")]          = c.heartbeatEnabled;
+    d[QStringLiteral("heartbeat_interval_mins")]    = c.heartbeatIntervalMins;
+    d[QStringLiteral("heartbeat_sub_channel")]      = c.heartbeatSubChannel;
+    d[QStringLiteral("tx_enabled")]                 = c.txEnabled;
+    d[QStringLiteral("auto_reply")]                 = c.autoReply;
+    d[QStringLiteral("ws_port")]                    = static_cast<int>(port());
+    d[QStringLiteral("ws_clients")]                 = m_clients.size();
     QJsonObject r;
     r[QStringLiteral("type")]  = QStringLiteral("event");
     r[QStringLiteral("event")] = QStringLiteral("status");
@@ -351,7 +376,9 @@ void WsServer::pushConfigChanged()
     d[QStringLiteral("frequency_khz")]              = c.frequencyKhz;
     d[QStringLiteral("tx_freq_hz")]                 = c.txFreqHz;
     d[QStringLiteral("heartbeat_enabled")]          = c.heartbeatEnabled;
-    d[QStringLiteral("heartbeat_interval_periods")] = c.heartbeatIntervalPeriods;
+    d[QStringLiteral("heartbeat_interval_mins")]    = c.heartbeatIntervalMins;
+    d[QStringLiteral("heartbeat_sub_channel")]      = c.heartbeatSubChannel;
+    d[QStringLiteral("tx_enabled")]                 = c.txEnabled;
     d[QStringLiteral("auto_reply")]                 = c.autoReply;
     broadcast(QStringLiteral("config.changed"), d);
 }
@@ -391,7 +418,9 @@ QJsonObject WsServer::cmdConfigGet(const QJsonObject &)
     d[QStringLiteral("txFreqHz")]                   = c.txFreqHz;
     d[QStringLiteral("txPowerPct")]                 = c.txPowerPct;
     d[QStringLiteral("heartbeatEnabled")]           = c.heartbeatEnabled;
-    d[QStringLiteral("heartbeatIntervalPeriods")]   = c.heartbeatIntervalPeriods;
+    d[QStringLiteral("heartbeatIntervalMins")]      = c.heartbeatIntervalMins;
+    d[QStringLiteral("heartbeatSubChannel")]        = c.heartbeatSubChannel;
+    d[QStringLiteral("txEnabled")]                  = c.txEnabled;
     d[QStringLiteral("autoReply")]                  = c.autoReply;
     d[QStringLiteral("stationInfo")]                = c.stationInfo;
     d[QStringLiteral("stationStatus")]              = c.stationStatus;
@@ -411,6 +440,8 @@ QJsonObject WsServer::cmdConfigGet(const QJsonObject &)
     d[QStringLiteral("pskReporterEnabled")]          = c.pskReporterEnabled;
     d[QStringLiteral("wsEnabled")]                  = c.wsEnabled;
     d[QStringLiteral("wsPort")]                     = c.wsPort;
+    d[QStringLiteral("infoMaxAgeMins")]             = c.infoMaxAgeMins;
+    d[QStringLiteral("heardMaxAgeMins")]            = c.heardMaxAgeMins;
     return d;
 }
 
@@ -430,8 +461,12 @@ QJsonObject WsServer::cmdConfigSet(const QJsonObject &d)
         m_app->apiSetTxFreqHz(d[QStringLiteral("txFreqHz")].toDouble());
     if (d.contains(QStringLiteral("heartbeatEnabled")))
         m_app->apiSetHeartbeatEnabled(d[QStringLiteral("heartbeatEnabled")].toBool());
-    if (d.contains(QStringLiteral("heartbeatIntervalPeriods")))
-        m_app->apiSetHeartbeatInterval(d[QStringLiteral("heartbeatIntervalPeriods")].toInt());
+    if (d.contains(QStringLiteral("heartbeatIntervalMins")))
+        m_app->apiSetHeartbeatIntervalMins(d[QStringLiteral("heartbeatIntervalMins")].toInt());
+    if (d.contains(QStringLiteral("heartbeatSubChannel")))
+        m_app->apiSetHeartbeatSubChannel(d[QStringLiteral("heartbeatSubChannel")].toBool());
+    if (d.contains(QStringLiteral("txEnabled")))
+        m_app->apiSetTxEnabled(d[QStringLiteral("txEnabled")].toBool());
     if (d.contains(QStringLiteral("autoReply")))
         m_app->apiSetAutoReply(d[QStringLiteral("autoReply")].toBool());
     if (d.contains(QStringLiteral("audioInputName")))
@@ -450,6 +485,10 @@ QJsonObject WsServer::cmdConfigSet(const QJsonObject &d)
         m_app->apiSetAutoAtu(d[QStringLiteral("autoAtu")].toBool());
     if (d.contains(QStringLiteral("pskReporterEnabled")))
         m_app->apiSetPskReporterEnabled(d[QStringLiteral("pskReporterEnabled")].toBool());
+    if (d.contains(QStringLiteral("infoMaxAgeMins")))
+        m_app->apiSetInfoMaxAgeMins(d[QStringLiteral("infoMaxAgeMins")].toInt());
+    if (d.contains(QStringLiteral("heardMaxAgeMins")))
+        m_app->apiSetHeardMaxAgeMins(d[QStringLiteral("heardMaxAgeMins")].toInt());
 
     // Rig config: update only fields present in the request
     const Config &cur = m_app->apiConfig();
@@ -800,6 +839,166 @@ QJsonObject WsServer::cmdTxStatusQuery(const QJsonObject &d)
     m_app->apiQueueTx(QStringLiteral("%1 %2 @?").arg(to, from));
     QJsonObject r;
     r[QStringLiteral("queue_size")] = m_app->apiTxQueueSize();
+    return r;
+}
+
+// ── New command handlers ──────────────────────────────────────────────────────
+
+QJsonObject WsServer::cmdQsoLogGet(const QJsonObject &d)
+{
+    const int offset = d.value(QStringLiteral("offset")).toInt(0);
+    const int limit  = d.value(QStringLiteral("limit")).toInt(100);
+    QJsonObject r;
+    r[QStringLiteral("qsos")]  = m_app->apiGetQsoLog(offset, limit);
+    r[QStringLiteral("total")] = QsoLog::instance().count();
+    return r;
+}
+
+QJsonObject WsServer::cmdQsoLogAdif(const QJsonObject &)
+{
+    QJsonObject r;
+    r[QStringLiteral("adif")] = m_app->apiExportAdif();
+    return r;
+}
+
+QJsonObject WsServer::cmdSolarGet(const QJsonObject &)
+{
+    return m_app->apiGetSolarData();
+}
+
+QJsonObject WsServer::cmdFreqScheduleGet(const QJsonObject &)
+{
+    QJsonObject r;
+    r[QStringLiteral("schedule")] = m_app->apiGetFreqSchedule();
+    return r;
+}
+
+QJsonObject WsServer::cmdFreqScheduleSet(const QJsonObject &d)
+{
+    const QJsonArray arr = d.value(QStringLiteral("schedule")).toArray();
+    QList<FreqScheduleEntry> entries;
+    for (const QJsonValue &v : arr)
+        entries.append(FreqScheduleEntry::fromJson(v.toObject()));
+    m_app->apiSetFreqSchedule(entries);
+    QJsonObject r;
+    r[QStringLiteral("count")] = entries.size();
+    return r;
+}
+
+QJsonObject WsServer::cmdInboxGet(const QJsonObject &d)
+{
+    const QString forCall = d.value(QStringLiteral("for")).toString().toUpper().trimmed();
+    const QList<InboxMessage> msgs = forCall.isEmpty()
+        ? MessageInbox::instance().messages()
+        : MessageInbox::instance().messagesForMe(forCall);
+    QJsonArray arr;
+    for (const InboxMessage &m : msgs) {
+        QJsonObject o;
+        o[QStringLiteral("id")]        = m.id;
+        o[QStringLiteral("utc_iso")]   = m.utc.toString(Qt::ISODate);
+        o[QStringLiteral("from")]      = m.from;
+        o[QStringLiteral("to")]        = m.to;
+        o[QStringLiteral("body")]      = m.text;
+        o[QStringLiteral("read")]      = m.read;
+        o[QStringLiteral("delivered")] = m.delivered;
+        arr.append(o);
+    }
+    QJsonObject r;
+    r[QStringLiteral("messages")] = arr;
+    r[QStringLiteral("total")]    = arr.size();
+    return r;
+}
+
+QJsonObject WsServer::cmdInboxSend(const QJsonObject &d)
+{
+    const QString to   = d.value(QStringLiteral("to")).toString().toUpper().trimmed();
+    const QString body = d.value(QStringLiteral("body")).toString().trimmed();
+    if (to.isEmpty())   throw QStringLiteral("to is required");
+    if (body.isEmpty()) throw QStringLiteral("body is required");
+    const QString mycall = m_app->apiConfig().callsign.toUpper();
+    // Queue immediately for TX
+    m_app->apiQueueTx(to + QStringLiteral(" ") + mycall + QStringLiteral(": MSG ") + body);
+    QJsonObject r;
+    r[QStringLiteral("queued")] = true;
+    return r;
+}
+
+QJsonObject WsServer::cmdInboxStore(const QJsonObject &d)
+{
+    const QString to   = d.value(QStringLiteral("to")).toString().toUpper().trimmed();
+    const QString body = d.value(QStringLiteral("body")).toString().trimmed();
+    if (to.isEmpty())   throw QStringLiteral("to is required");
+    if (body.isEmpty()) throw QStringLiteral("body is required");
+    const QString mycall = m_app->apiConfig().callsign.toUpper();
+    InboxMessage msg;
+    msg.utc  = QDateTime::currentDateTimeUtc();
+    msg.from = mycall;
+    msg.to   = to;
+    msg.text = body;
+    const int newId = MessageInbox::instance().store(msg);
+    QJsonObject r;
+    r[QStringLiteral("id")] = newId;
+    return r;
+}
+
+QJsonObject WsServer::cmdInboxDelete(const QJsonObject &d)
+{
+    const int id = d.value(QStringLiteral("id")).toInt(-1);
+    if (id < 0) throw QStringLiteral("id is required (integer)");
+    MessageInbox::instance().remove(id);
+    QJsonObject r;
+    r[QStringLiteral("deleted")] = true;
+    return r;
+}
+
+QJsonObject WsServer::cmdInboxMarkRead(const QJsonObject &d)
+{
+    const int id = d.value(QStringLiteral("id")).toInt(-1);
+    if (id < 0) throw QStringLiteral("id is required (integer)");
+    MessageInbox::instance().markRead(id);
+    QJsonObject r;
+    r[QStringLiteral("ok")] = true;
+    return r;
+}
+
+QJsonObject WsServer::cmdBandsGet(const QJsonObject &)
+{
+    QJsonObject r;
+    r[QStringLiteral("bands")] = m_app->apiGetBandList();
+    return r;
+}
+
+QJsonObject WsServer::cmdBandsSet(const QJsonObject &d)
+{
+    const QJsonArray arr = d.value(QStringLiteral("bands")).toArray();
+    QList<BandEntry> entries;
+    for (const QJsonValue &v : arr)
+        entries.append(BandEntry::fromJson(v.toObject()));
+    m_app->apiSetBandList(entries);
+    QJsonObject r;
+    r[QStringLiteral("count")] = entries.size();
+    return r;
+}
+
+QJsonObject WsServer::cmdTxGridQuery(const QJsonObject &d)
+{
+    const QString to = d.value(QStringLiteral("to")).toString().toUpper().trimmed();
+    if (to.isEmpty()) throw QStringLiteral("to is required");
+    const QString mycall = m_app->apiConfig().callsign.toUpper();
+    m_app->apiQueueTx(to + QStringLiteral(" ") + mycall + QStringLiteral(": @GRID?"));
+    QJsonObject r;
+    r[QStringLiteral("queued")] = true;
+    return r;
+}
+
+QJsonObject WsServer::cmdTxHearingQuery(const QJsonObject &d)
+{
+    const QString to = d.value(QStringLiteral("to")).toString().toUpper().trimmed();
+    if (to.isEmpty()) throw QStringLiteral("to is required");
+    const QString mycall = m_app->apiConfig().callsign.toUpper();
+    m_app->apiQueueTx(to + QStringLiteral(" ") + mycall + QStringLiteral(": @HEARING?"));
+    QJsonObject r;
+    r[QStringLiteral("queued")] = true;
     return r;
 }
 

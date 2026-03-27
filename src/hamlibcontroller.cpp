@@ -66,7 +66,10 @@ bool HamlibController::connectRig(const RigConfig &cfg)
         default: ser.rts_state = RIG_SIGNAL_UNSET; break;
     }
 
-    m_pttType = cfg.pttType;
+    m_pttType       = cfg.pttType;
+    m_emulatedSplit = cfg.emulatedSplit;
+    m_txFreqKhz     = (cfg.txFreqKhz > 0.0) ? cfg.txFreqKhz : 0.0;
+    m_rxFreqKhz     = 0.0;  // will be captured on first PTT-up
     switch (cfg.pttType) {
         case 1:  m_rig->state.pttport.type.ptt = RIG_PTT_RIG;         break;
         case 2:  m_rig->state.pttport.type.ptt = RIG_PTT_SERIAL_DTR;  break;
@@ -178,6 +181,19 @@ bool HamlibController::setPtt(bool transmit)
         emit error(QStringLiteral("Radio not connected"));
         return false;
     }
+
+    // Emulated split: switch to TX freq on PTT-up, back to RX freq on PTT-down.
+    if (m_emulatedSplit && m_txFreqKhz > 0.0) {
+        if (transmit) {
+            // Capture current RX frequency before switching
+            m_rxFreqKhz = getFrequency();
+            if (m_rxFreqKhz > 0.0) setFrequency(m_txFreqKhz);
+        } else {
+            // Restore RX frequency before dropping PTT so CAT-based PTT lands right
+            if (m_rxFreqKhz > 0.0) setFrequency(m_rxFreqKhz);
+        }
+    }
+
     const ptt_t ptt = transmit ? RIG_PTT_ON : RIG_PTT_OFF;
     int ret = rig_set_ptt(m_rig, RIG_VFO_CURR, ptt);
     if (ret != RIG_OK) {
