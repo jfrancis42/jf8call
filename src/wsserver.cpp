@@ -273,6 +273,7 @@ void WsServer::pushMessageDecoded(const JF8Message &msg)
     d[QStringLiteral("raw")]           = msg.rawText;
     d[QStringLiteral("type")]          = static_cast<int>(msg.type);
     d[QStringLiteral("type_name")]     = messageTypeName(msg.type);
+    d[QStringLiteral("is_complete")]   = true;
     broadcast(QStringLiteral("message.decoded"), d);
 }
 

@@ -6,9 +6,6 @@
 #include <cstring>
 #include <algorithm>
 
-// KissFFT for spectrum
-#include <kissfft/kiss_fft.h>
-
 static constexpr float k_pi  = 3.14159265358979323846f;
 static constexpr int   k_inputRate  = 48000;  // PortAudio capture rate
 
@@ -60,6 +57,14 @@ void AudioInput::buildFirFilter()
         for (float &c : m_firCoeffs) c /= gain;
 
     m_firBuf.assign(N, 0.0f);
+
+    // Rebuild FFT plan when target rate changes (k_fftSize is constant, but
+    // do it here so the plan is always valid before any audio arrives).
+    if (m_fftCfg) kiss_fft_free(m_fftCfg);
+    m_fftCfg = kiss_fft_alloc(k_fftSize, 0, nullptr, nullptr);
+    m_fftIn .assign(k_fftSize, {0.0f, 0.0f});
+    m_fftOut.assign(k_fftSize, {0.0f, 0.0f});
+    m_fftMag.assign(k_fftSize / 2, 0.0f);
 }
 
 // ── Configuration ────────────────────────────────────────────────────────────
@@ -96,6 +101,7 @@ AudioInput::~AudioInput()
 {
     stop();
     Pa_Terminate();
+    if (m_fftCfg) kiss_fft_free(m_fftCfg);
 }
 
 // ── PortAudio callback ────────────────────────────────────────────────────────
@@ -168,29 +174,23 @@ void AudioInput::processInputBlock(const float *stereoIn, unsigned long frames)
 
 void AudioInput::computeSpectrum()
 {
-    // Hann window + kiss_fft
-    std::vector<kiss_fft_cpx> in(k_fftSize), out(k_fftSize / 2 + 1);
-    kiss_fft_cfg cfg = kiss_fft_alloc(k_fftSize, 0, nullptr, nullptr);
-    if (!cfg) return;
+    if (!m_fftCfg) return;
 
+    // Apply Hann window into pre-allocated input buffer
     for (int i = 0; i < k_fftSize; ++i) {
         float w = 0.5f * (1.0f - std::cos(2.0f * k_pi * i / (k_fftSize - 1)));
-        in[i].r = m_fftBuf[i] * w;
-        in[i].i = 0.0f;
+        m_fftIn[i].r = m_fftBuf[i] * w;
+        m_fftIn[i].i = 0.0f;
     }
 
-    // Full complex FFT → take first half
-    std::vector<kiss_fft_cpx> full(k_fftSize);
-    kiss_fft(cfg, in.data(), full.data());
-    kiss_fft_free(cfg);
+    kiss_fft(m_fftCfg, m_fftIn.data(), m_fftOut.data());
 
-    std::vector<float> magnitudes(k_fftSize / 2);
     for (int i = 0; i < k_fftSize / 2; ++i) {
-        float re = full[i].r, im = full[i].i;
-        magnitudes[i] = std::sqrt(re * re + im * im);
+        float re = m_fftOut[i].r, im = m_fftOut[i].i;
+        m_fftMag[i] = std::sqrt(re * re + im * im);
     }
 
-    emit spectrumReady(std::move(magnitudes), static_cast<float>(m_targetRate));
+    emit spectrumReady(m_fftMag, static_cast<float>(m_targetRate));
 }
 
 // ── start / stop ─────────────────────────────────────────────────────────────

@@ -1483,6 +1483,8 @@ void MainWindow::onDecodeFinished(const QList<QVariantMap> &results)
                                    spotFreqHz, snrDb, msg.utc);
         }
 
+        const bool showEom = isEom || (isGfsk8 && (frameIsLast || isSingleFrame));
+
         // Heard pane: upsert entry for this frequency.
         if (m_infoPane) {
             const QString display = msg.rawText.isEmpty() ? msg.body : msg.rawText;
@@ -1491,7 +1493,6 @@ void MainWindow::onDecodeFinished(const QList<QVariantMap> &results)
                 : QStringLiteral("%1  {%2}").arg(display, msg.grid);
             const int freqKey = static_cast<int>(std::round(msg.audioFreqHz / 10.0f));
 
-            const bool showEom = isEom || (isGfsk8 && (frameIsLast || isSingleFrame));
             const QString eomSuffix = showEom ? QStringLiteral(" \u2666") : QString();
 
             auto it = m_heardFreqBlock.find(freqKey);
@@ -1524,9 +1525,10 @@ void MainWindow::onDecodeFinished(const QList<QVariantMap> &results)
                  msg.from.toUpper() == m_selectedCallsign.toUpper() ||
                  directedToMe);
             if (showInInteractive) {
-                const QString line = QStringLiteral("[%1] %2")
+                const QString line = QStringLiteral("[%1] %2%3")
                     .arg(msg.utc.toLocalTime().toString(QStringLiteral("HH:mm:ss")))
-                    .arg(msg.rawText.isEmpty() ? msg.body : msg.rawText);
+                    .arg(msg.rawText.isEmpty() ? msg.body : msg.rawText)
+                    .arg(showEom ? QStringLiteral(" \u2666") : QString());
                 m_interactiveDisplay->appendPlainText(line);
             }
         }
