@@ -154,6 +154,7 @@ Config Config::load()
     for (const QJsonValue &v : o.value(u"freqSchedule").toArray())
         c.freqSchedule.append(FreqScheduleEntry::fromJson(v.toObject()));
     if (o.contains(u"groups")) {
+        c.groups.clear();
         for (const QJsonValue &v : o.value(u"groups").toArray())
             c.groups.append(v.toString().toUpper());
     }
