@@ -251,7 +251,7 @@ set(SOURCES
     src/messageinbox.cpp
     src/hamlibcontroller.cpp
     src/gfsk8_modem.cpp
-    src/js8message.cpp
+    src/jf8message.cpp
     src/messagemodel.cpp
     src/waterfallwidget.cpp
     src/audioinput.cpp
@@ -294,7 +294,7 @@ set(HEADERS
     src/gridcache.h
     src/messageinbox.h
     src/hamlibcontroller.h
-    src/js8message.h
+    src/jf8message.h
     src/messagemodel.h
     src/waterfallwidget.h
     src/audioinput.h

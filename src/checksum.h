@@ -8,17 +8,17 @@
 //             "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ+-./?".
 //
 // Usage for transmit:
-//   QString txText = JS8Checksum::appendChecksum(directedText);
+//   QString txText = JF8Checksum::appendChecksum(directedText);
 //
 // Usage for receive:
 //   QString body = parsedBody;
-//   msg.hasChecksum = JS8Checksum::tryStrip(body, msg.checksumValid);
+//   msg.hasChecksum = JF8Checksum::tryStrip(body, msg.checksumValid);
 //   // body now has the checksum suffix removed
 
 #include <QString>
 #include <cstdint>
 
-namespace JS8Checksum {
+namespace JF8Checksum {
 
 // Compute CRC-16/KERMIT over the local-8-bit representation of text.
 uint16_t crc16(const QString &text);
@@ -40,4 +40,4 @@ QString  appendChecksum(const QString &text);
 // If no checksum-shaped suffix is found, leave text unchanged and return false.
 bool     tryStrip(QString &text, bool &valid);
 
-} // namespace JS8Checksum
+} // namespace JF8Checksum

@@ -51,7 +51,7 @@ QVariant MessageModel::data(const QModelIndex &index, int role) const
 
     const int msgIdx = index.row();
     if (msgIdx >= m_messages.size()) return {};
-    const JS8Message &msg = m_messages.at(msgIdx);
+    const JF8Message &msg = m_messages.at(msgIdx);
 
     if (role == Qt::DisplayRole || role == Qt::UserRole) {
         const qint64 ageSecs = msg.utc.secsTo(QDateTime::currentDateTimeUtc());
@@ -66,7 +66,7 @@ QVariant MessageModel::data(const QModelIndex &index, int role) const
                     ? QStringLiteral("%1s").arg(ageSecs)
                     : QStringLiteral("%1m%2s").arg(ageSecs / 60).arg(ageSecs % 60, 2, 10, QChar('0'));
             case ColTime:
-                return msg.utc.toString(QStringLiteral("HH:mm:ss"));
+                return msg.utc.toLocalTime().toString(QStringLiteral("HH:mm:ss"));
             case ColFreq:
                 if (role == Qt::UserRole) return msg.audioFreqHz;
                 return msg.audioFreqHz >= 0
@@ -107,23 +107,23 @@ QVariant MessageModel::data(const QModelIndex &index, int role) const
             return QBrush(QColor(0x55, 0x55, 0x66));        // dim grey
 
         switch (msg.type) {
-            case JS8Message::Type::Heartbeat:
+            case JF8Message::Type::Heartbeat:
                 return QBrush(QColor(0x7f, 0xbf, 0x7f));   // green
-            case JS8Message::Type::SnrQuery:
-            case JS8Message::Type::InfoQuery:
-            case JS8Message::Type::StatusQuery:
-            case JS8Message::Type::GridQuery:
-            case JS8Message::Type::HearingQuery:
-            case JS8Message::Type::QueryMsgs:
-            case JS8Message::Type::QueryMsg:
+            case JF8Message::Type::SnrQuery:
+            case JF8Message::Type::InfoQuery:
+            case JF8Message::Type::StatusQuery:
+            case JF8Message::Type::GridQuery:
+            case JF8Message::Type::HearingQuery:
+            case JF8Message::Type::QueryMsgs:
+            case JF8Message::Type::QueryMsg:
                 return QBrush(QColor(0xc9, 0xa8, 0x4c));   // amber
-            case JS8Message::Type::DirectedMessage:
-            case JS8Message::Type::MsgCommand:
+            case JF8Message::Type::DirectedMessage:
+            case JF8Message::Type::MsgCommand:
                 return QBrush(QColor(0xe8, 0xe0, 0xd0));   // bright white
-            case JS8Message::Type::AckMessage:
+            case JF8Message::Type::AckMessage:
                 return QBrush(QColor(0x7f, 0xbf, 0xff));   // blue
-            case JS8Message::Type::MsgAvailable:
-            case JS8Message::Type::MsgDelivery:
+            case JF8Message::Type::MsgAvailable:
+            case JF8Message::Type::MsgDelivery:
                 return QBrush(QColor(0xff, 0xd0, 0x80));   // orange/gold
             default:
                 return QBrush(QColor(0x88, 0x88, 0x99));   // dim
@@ -164,7 +164,7 @@ void MessageModel::sort(int column, Qt::SortOrder order)
 
     beginResetModel();
     std::stable_sort(m_messages.begin(), m_messages.end(),
-        [&](const JS8Message &a, const JS8Message &b) -> bool {
+        [&](const JF8Message &a, const JF8Message &b) -> bool {
             bool less = false;
             switch (column) {
                 case ColAge:  less = a.utc > b.utc; break;  // newer = smaller age
@@ -188,7 +188,7 @@ void MessageModel::setMaxAgeMins(int mins)
     m_maxAgeMins = qMax(1, mins);
 }
 
-void MessageModel::addMessage(const JS8Message &msg)
+void MessageModel::addMessage(const JF8Message &msg)
 {
     // Don't show anonymous or hash-compressed callsigns (e.g. "<...>").
     if (msg.from.isEmpty() || msg.from.startsWith(QLatin1Char('<'))) return;
@@ -197,7 +197,7 @@ void MessageModel::addMessage(const JS8Message &msg)
     if (!msg.from.isEmpty()) {
         for (int i = 0; i < m_messages.size(); ++i) {
             if (m_messages[i].from.toUpper() == msg.from.toUpper()) {
-                JS8Message &existing = m_messages[i];
+                JF8Message &existing = m_messages[i];
                 existing.utc        = msg.utc;
                 existing.audioFreqHz = msg.audioFreqHz;
                 existing.snrDb      = msg.snrDb;
@@ -232,7 +232,7 @@ void MessageModel::addMessage(const JS8Message &msg)
     sort(m_sortColumn, m_sortOrder);
 }
 
-const JS8Message &MessageModel::messageAt(int msgIdx) const
+const JF8Message &MessageModel::messageAt(int msgIdx) const
 {
     return m_messages.at(msgIdx);
 }

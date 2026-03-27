@@ -7,7 +7,7 @@
 #include "audioinput.h"
 #include "audiooutput.h"
 #include "messagemodel.h"
-#include "js8message.h"
+#include "jf8message.h"
 #include "qsolog.h"
 #include "messageinbox.h"
 #include "freqschedule.h"
@@ -253,7 +253,7 @@ void WsServer::broadcast(const QString &event, const QJsonObject &data)
 
 // ── Push events ───────────────────────────────────────────────────────────────
 
-void WsServer::pushMessageDecoded(const JS8Message &msg)
+void WsServer::pushMessageDecoded(const JF8Message &msg)
 {
     QJsonObject d;
     d[QStringLiteral("time")]          = msg.utc.toString(QStringLiteral("HH:mm:ss"));
@@ -442,6 +442,11 @@ QJsonObject WsServer::cmdConfigGet(const QJsonObject &)
     d[QStringLiteral("wsPort")]                     = c.wsPort;
     d[QStringLiteral("infoMaxAgeMins")]             = c.infoMaxAgeMins;
     d[QStringLiteral("heardMaxAgeMins")]            = c.heardMaxAgeMins;
+    {
+        QJsonArray arr;
+        for (const QString &g : c.groups) arr.append(g);
+        d[QStringLiteral("groups")] = arr;
+    }
     return d;
 }
 
@@ -489,6 +494,12 @@ QJsonObject WsServer::cmdConfigSet(const QJsonObject &d)
         m_app->apiSetInfoMaxAgeMins(d[QStringLiteral("infoMaxAgeMins")].toInt());
     if (d.contains(QStringLiteral("heardMaxAgeMins")))
         m_app->apiSetHeardMaxAgeMins(d[QStringLiteral("heardMaxAgeMins")].toInt());
+    if (d.contains(QStringLiteral("groups"))) {
+        QStringList groups;
+        for (const QJsonValue &v : d[QStringLiteral("groups")].toArray())
+            groups.append(v.toString().toUpper());
+        m_app->apiSetGroups(groups);
+    }
 
     // Rig config: update only fields present in the request
     const Config &cur = m_app->apiConfig();
@@ -1004,18 +1015,18 @@ QJsonObject WsServer::cmdTxHearingQuery(const QJsonObject &d)
 
 // ── Private helpers ───────────────────────────────────────────────────────────
 
-QString WsServer::messageTypeName(JS8Message::Type t)
+QString WsServer::messageTypeName(JF8Message::Type t)
 {
     switch (t) {
-        case JS8Message::Type::Heartbeat:        return QStringLiteral("Heartbeat");
-        case JS8Message::Type::DirectedMessage:  return QStringLiteral("DirectedMessage");
-        case JS8Message::Type::SnrQuery:         return QStringLiteral("SnrQuery");
-        case JS8Message::Type::SnrReply:         return QStringLiteral("SnrReply");
-        case JS8Message::Type::InfoQuery:        return QStringLiteral("InfoQuery");
-        case JS8Message::Type::InfoReply:        return QStringLiteral("InfoReply");
-        case JS8Message::Type::StatusQuery:      return QStringLiteral("StatusQuery");
-        case JS8Message::Type::StatusReply:      return QStringLiteral("StatusReply");
-        case JS8Message::Type::CompoundDirected: return QStringLiteral("CompoundDirected");
+        case JF8Message::Type::Heartbeat:        return QStringLiteral("Heartbeat");
+        case JF8Message::Type::DirectedMessage:  return QStringLiteral("DirectedMessage");
+        case JF8Message::Type::SnrQuery:         return QStringLiteral("SnrQuery");
+        case JF8Message::Type::SnrReply:         return QStringLiteral("SnrReply");
+        case JF8Message::Type::InfoQuery:        return QStringLiteral("InfoQuery");
+        case JF8Message::Type::InfoReply:        return QStringLiteral("InfoReply");
+        case JF8Message::Type::StatusQuery:      return QStringLiteral("StatusQuery");
+        case JF8Message::Type::StatusReply:      return QStringLiteral("StatusReply");
+        case JF8Message::Type::CompoundDirected: return QStringLiteral("CompoundDirected");
         default:                                 return QStringLiteral("Unknown");
     }
 }

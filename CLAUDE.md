@@ -101,7 +101,7 @@ src/audioinput.h/.cpp     — PortAudio input thread → FIR decimate → decode
 src/audiooutput.h/.cpp    — PortAudio output thread → plays modulated audio
 src/waterfallwidget.h/.cpp — QWidget custom painting: scrolling spectrogram (2048-pt FFT)
 src/messagemodel.h/.cpp   — QAbstractTableModel for received messages
-src/js8message.h/.cpp     — JS8 message parsing, @ command handling, DecodedText wrapper
+src/jf8message.h/.cpp     — JS8 message parsing, @ command handling, DecodedText wrapper
 src/periodclock.h/.cpp    — JS8 period boundary timer (UTC-aligned QTimer)
 ```
 
@@ -162,7 +162,7 @@ TX is started at the period boundary + start_delay_ms for the active submode.
 
 ## @ Message Protocol
 
-Implemented in js8message.cpp:
+Implemented in jf8message.cpp:
 
 | @ Command     | Description                             | Auto-reply       |
 |---------------|-----------------------------------------|------------------|
@@ -194,12 +194,12 @@ The JS8 frame type bits (`Varicode::TransmissionType` in `gfsk8-modem-clean/src/
 Rules:
 1. **Wait for the last frame** before sending ACK: check `(d.frameType & Varicode::JS8CallLast) != 0`.
    `FrameDirected` (single-frame) has this bit set, so it is handled correctly too.
-2. **Only ACK `MsgCommand` type** (`msg.type == JS8Message::Type::MsgCommand`).
+2. **Only ACK `MsgCommand` type** (`msg.type == JF8Message::Type::MsgCommand`).
    `DirectedMessage` (generic freetext directed to you) does NOT get an auto-ACK.
 
 What does NOT trigger an ACK:
 - First or middle frames of any multi-frame message
-- Generic directed freetext (`JS8Message::Type::DirectedMessage`)
+- Generic directed freetext (`JF8Message::Type::DirectedMessage`)
 - Heartbeats, query commands, query responses
 
 ---

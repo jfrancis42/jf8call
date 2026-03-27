@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "checksum.h"
 
-namespace JS8Checksum {
+namespace JF8Checksum {
 
 // Base-41 alphabet matching JS8Call's Varicode::pack16bits
 static const char kAlphabet[42] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ+-./?";
@@ -70,4 +70,4 @@ bool tryStrip(QString &text, bool &valid)
     return true;
 }
 
-} // namespace JS8Checksum
+} // namespace JF8Checksum

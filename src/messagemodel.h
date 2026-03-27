@@ -3,7 +3,7 @@
 #include <QAbstractTableModel>
 #include <QList>
 #include <QTimer>
-#include "js8message.h"
+#include "jf8message.h"
 
 class MessageModel : public QAbstractTableModel {
     Q_OBJECT
@@ -20,10 +20,10 @@ public:
     QVariant headerData(int section, Qt::Orientation orientation, int role) const override;
     void sort(int column, Qt::SortOrder order = Qt::AscendingOrder) override;
 
-    void addMessage(const JS8Message &msg);
+    void addMessage(const JF8Message &msg);
 
     // 0-based index into m_messages (not model row — model row = msgIdx + 1).
-    const JS8Message &messageAt(int msgIdx) const;
+    const JF8Message &messageAt(int msgIdx) const;
     int  messageCount() const { return m_messages.size(); }
 
     void clear();
@@ -35,7 +35,7 @@ private:
     static constexpr double k_kmToMi = 0.621371;
     bool m_distMiles  = true;
     int  m_maxAgeMins = 30;
-    QList<JS8Message> m_messages;  // newest at index 0 (model row 1)
+    QList<JF8Message> m_messages;  // newest at index 0 (model row 1)
     QTimer *m_ageTimer = nullptr;
     int  m_sortColumn = ColAge;
     Qt::SortOrder m_sortOrder = Qt::AscendingOrder;

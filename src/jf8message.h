@@ -1,14 +1,15 @@
 #pragma once
 // SPDX-License-Identifier: GPL-3.0-or-later
-// JS8 message parsing and @ command handling
+// JF8 message parsing and @ command handling
 
 #include <QObject>
 #include <QString>
+#include <QStringList>
 #include <QDateTime>
 #include "imodem.h"
 
 // Parsed / decoded JS8 message ready for display and handling.
-struct JS8Message {
+struct JF8Message {
     QDateTime  utc;
     float      audioFreqHz  = 0.0f;
     int        snrDb        = 0;
@@ -61,12 +62,14 @@ struct JS8Message {
     };
     Type type = Type::Unknown;
 
-    bool isAddressedToMe(const QString &mycall) const;
+    // Returns true if this message is addressed directly to mycall,
+    // or to any group in the supplied membership list.
+    bool isAddressedToMe(const QString &mycall, const QStringList &groups = {}) const;
 };
 
 // Parses a ModemDecoded struct (from the modem interface) and the raw text
-// from DecodedText into a JS8Message.
-JS8Message parseDecoded(const ModemDecoded &d,
+// from DecodedText into a JF8Message.
+JF8Message parseDecoded(const ModemDecoded &d,
                         const QString &rawText,
                         const QString &mycall);
 

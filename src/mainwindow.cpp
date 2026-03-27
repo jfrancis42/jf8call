@@ -7,7 +7,7 @@
 #include "audiooutput.h"
 #include <QScrollArea>
 #include "periodclock.h"
-#include "js8message.h"
+#include "jf8message.h"
 #include "DecodedText.h"
 #include "pskreporter.h"
 
@@ -1362,7 +1362,7 @@ void MainWindow::onDecodeFinished(const QList<QVariantMap> &results)
             m_gfsk8FrameBuffers[fKey] = buf;
             // Fall through to heard pane update only (no model/wsServer/auto-reply yet).
             // Parse just enough to get display text for heard pane.
-            JS8Message partialMsg = parseDecoded(d, effectiveRawText, m_config.callsign);
+            JF8Message partialMsg = parseDecoded(d, effectiveRawText, m_config.callsign);
             // Heard pane: first frame — start or extend entry for this frequency.
             if (m_infoPane) {
                 const QString display = partialMsg.rawText.isEmpty()
@@ -1426,7 +1426,7 @@ void MainWindow::onDecodeFinished(const QList<QVariantMap> &results)
         }
         // else: isSingleFrame (FrameDirected=3) or streaming modem — process immediately.
 
-        JS8Message msg = parseDecoded(d, effectiveRawText, m_config.callsign);
+        JF8Message msg = parseDecoded(d, effectiveRawText, m_config.callsign);
         // ── END GFSK8 multi-frame assembly ────────────────────────────────────
 
         // Update / fill grid from persistent cache
@@ -1452,15 +1452,15 @@ void MainWindow::onDecodeFinished(const QList<QVariantMap> &results)
         // Flag stations that have explicitly replied to us.
         if (msg.isAddressedToMe(m_config.callsign)) {
             switch (msg.type) {
-                case JS8Message::Type::SnrReply:
-                case JS8Message::Type::InfoReply:
-                case JS8Message::Type::StatusReply:
-                case JS8Message::Type::GridReply:
-                case JS8Message::Type::HearingReply:
-                case JS8Message::Type::AckMessage:
-                case JS8Message::Type::MsgAvailable:
-                case JS8Message::Type::MsgNotAvailable:
-                case JS8Message::Type::MsgDelivery:
+                case JF8Message::Type::SnrReply:
+                case JF8Message::Type::InfoReply:
+                case JF8Message::Type::StatusReply:
+                case JF8Message::Type::GridReply:
+                case JF8Message::Type::HearingReply:
+                case JF8Message::Type::AckMessage:
+                case JF8Message::Type::MsgAvailable:
+                case JF8Message::Type::MsgNotAvailable:
+                case JF8Message::Type::MsgDelivery:
                     msg.heardMe = true;
                     break;
                 default:
@@ -1501,7 +1501,7 @@ void MainWindow::onDecodeFinished(const QList<QVariantMap> &results)
             } else {
                 HeardEntry he;
                 he.text = QStringLiteral("[%1 +%2] %3%4")
-                    .arg(msg.utc.toString(QStringLiteral("HH:mm:ss")))
+                    .arg(msg.utc.toLocalTime().toString(QStringLiteral("HH:mm:ss")))
                     .arg(static_cast<int>(msg.audioFreqHz))
                     .arg(newText, eomSuffix);
                 he.lastUpdate = msg.utc;
@@ -1510,20 +1510,22 @@ void MainWindow::onDecodeFinished(const QList<QVariantMap> &results)
             rebuildHeardPane();
         }
 
-        // Interactive pane: show messages within ±100 Hz of the TX/RX offset.
+        // Interactive pane: show messages within ±100 Hz of the TX/RX offset,
+        // AND always show any message directed to me (by callsign or group).
         // In focus mode (callsign selected), only show messages from that station.
         if (m_interactiveDisplay) {
             constexpr float kOffsetTolerance = 100.0f;
             const bool nearOffset = std::abs(msg.audioFreqHz - static_cast<float>(m_config.txFreqHz))
                     < kOffsetTolerance;
-            const bool showInInteractive = nearOffset &&
+            const bool directedToMe = msg.isAddressedToMe(m_config.callsign, m_config.groups);
+            const bool showInInteractive = (nearOffset || directedToMe) &&
                 (m_selectedCallsign.isEmpty() ||
                  m_selectedCallsign == QStringLiteral("@ALL") ||
                  msg.from.toUpper() == m_selectedCallsign.toUpper() ||
-                 msg.isAddressedToMe(m_config.callsign));
+                 directedToMe);
             if (showInInteractive) {
                 const QString line = QStringLiteral("[%1] %2")
-                    .arg(msg.utc.toString(QStringLiteral("HH:mm:ss")))
+                    .arg(msg.utc.toLocalTime().toString(QStringLiteral("HH:mm:ss")))
                     .arg(msg.rawText.isEmpty() ? msg.body : msg.rawText);
                 m_interactiveDisplay->appendPlainText(line);
             }
@@ -1538,10 +1540,10 @@ void MainWindow::onDecodeFinished(const QList<QVariantMap> &results)
         const bool allowAutoReply = !focusMode || focusMatch;
 
         // Auto-reply handling
-        if (m_config.autoReply && allowAutoReply && msg.isAddressedToMe(m_config.callsign)) {
-            if (msg.type == JS8Message::Type::SnrQuery) {
+        if (m_config.autoReply && allowAutoReply && msg.isAddressedToMe(m_config.callsign, m_config.groups)) {
+            if (msg.type == JF8Message::Type::SnrQuery) {
                 sendAutoReply(msg.from, QStringLiteral("SNR %1 dB").arg(snrDb), snrDb);
-            } else if (msg.type == JS8Message::Type::InfoQuery) {
+            } else if (msg.type == JF8Message::Type::InfoQuery) {
                 const QString info = m_config.stationInfo.isEmpty()
                     ? QStringLiteral("%1/%2/%3/JF8Call %4")
                         .arg(m_config.callsign)
@@ -1550,19 +1552,19 @@ void MainWindow::onDecodeFinished(const QList<QVariantMap> &results)
                         .arg(JF8CALL_VERSION_STR)
                     : m_config.stationInfo;
                 sendAutoReply(msg.from, QStringLiteral("INFO ") + info, snrDb);
-            } else if (msg.type == JS8Message::Type::StatusQuery) {
+            } else if (msg.type == JF8Message::Type::StatusQuery) {
                 const QString status = m_config.stationStatus.isEmpty()
                     ? QStringLiteral("HEARD")
                     : QStringLiteral("STATUS ") + m_config.stationStatus;
                 sendAutoReply(msg.from, status, snrDb);
-            } else if (msg.type == JS8Message::Type::GridQuery) {
+            } else if (msg.type == JF8Message::Type::GridQuery) {
                 sendAutoReply(msg.from, QStringLiteral("GRID ") + m_config.grid, snrDb);
-            } else if (msg.type == JS8Message::Type::HearingQuery) {
+            } else if (msg.type == JF8Message::Type::HearingQuery) {
                 // Collect up to 10 recently heard unique callsigns
                 QStringList heard;
                 const int mc = m_model->messageCount();
                 for (int hi = 0; hi < mc && heard.size() < 10; ++hi) {
-                    const JS8Message &hm = m_model->messageAt(hi);
+                    const JF8Message &hm = m_model->messageAt(hi);
                     if (!hm.from.isEmpty() && !heard.contains(hm.from))
                         heard.append(hm.from);
                 }
@@ -1570,7 +1572,7 @@ void MainWindow::onDecodeFinished(const QList<QVariantMap> &results)
                     QStringLiteral("HEARING ") + (heard.isEmpty()
                         ? QStringLiteral("NONE") : heard.join(QLatin1Char(' '))),
                     snrDb);
-            } else if (msg.type == JS8Message::Type::QueryMsgs) {
+            } else if (msg.type == JF8Message::Type::QueryMsgs) {
                 // Check for undelivered relay messages we hold for this station
                 const auto relay = MessageInbox::instance().relayMessagesFor(msg.from);
                 if (relay.isEmpty()) {
@@ -1579,7 +1581,7 @@ void MainWindow::onDecodeFinished(const QList<QVariantMap> &results)
                     sendAutoReply(msg.from,
                         QStringLiteral("YES MSG ID %1").arg(relay.first().id), snrDb);
                 }
-            } else if (msg.type == JS8Message::Type::QueryMsg) {
+            } else if (msg.type == JF8Message::Type::QueryMsg) {
                 // "QUERY MSG <id>" — retrieve specific relay message
                 const QString bodyUp = msg.body.toUpper();
                 const int spPos = bodyUp.lastIndexOf(QLatin1Char(' '));
@@ -1604,8 +1606,8 @@ void MainWindow::onDecodeFinished(const QList<QVariantMap> &results)
         // JS8CallLast (bit 1) is set on the final frame of a multi-frame message,
         // and on FrameDirected (=3) which is a single-frame message.
         const bool isLastFrame = (d.frameType & Varicode::JS8CallLast) != 0;
-        if (isLastFrame && msg.isAddressedToMe(m_config.callsign) && !msg.from.isEmpty()) {
-            if (msg.type == JS8Message::Type::MsgCommand) {
+        if (isLastFrame && msg.isAddressedToMe(m_config.callsign, m_config.groups) && !msg.from.isEmpty()) {
+            if (msg.type == JF8Message::Type::MsgCommand) {
                 const QString ack = msg.from + QStringLiteral(" ") + m_config.callsign
                                    + QStringLiteral(": ACK");
                 transmitMessage(ack);
@@ -1613,7 +1615,7 @@ void MainWindow::onDecodeFinished(const QList<QVariantMap> &results)
         }
 
         // MSG storage: store MsgCommand messages for this station or for relay.
-        if (msg.type == JS8Message::Type::MsgCommand && !msg.from.isEmpty()) {
+        if (msg.type == JF8Message::Type::MsgCommand && !msg.from.isEmpty()) {
             // Strip "MSG " prefix from body to get message text
             const QString msgText = msg.body.startsWith(QStringLiteral("MSG "), Qt::CaseInsensitive)
                 ? msg.body.mid(4).trimmed() : msg.body;
@@ -1655,6 +1657,13 @@ void MainWindow::onDecodeFinished(const QList<QVariantMap> &results)
 // messages typed directly into the TX field.
 static bool looksLikeCallsign(const QString &word)
 {
+    // Accept @GROUP names (@ALL, @PRA, @AMRRON, etc.)
+    if (word.startsWith(QLatin1Char('@')) && word.length() >= 2) {
+        for (int i = 1; i < word.length(); ++i)
+            if (!word[i].isLetterOrNumber()) return false;
+        return true;
+    }
+    // Normal callsign: requires at least one letter and one digit
     if (word.length() < 3 || word.length() > 12) return false;
     bool hasLetter = false, hasDigit = false;
     for (const QChar &c : word) {
@@ -2513,6 +2522,18 @@ void MainWindow::apiSetBandList(const QList<BandEntry> &bands)
     if (m_wsServer) m_wsServer->pushConfigChanged();
 }
 
+void MainWindow::apiSetGroups(const QStringList &groups)
+{
+    m_config.groups = groups;
+    m_config.save();
+    if (m_wsServer) m_wsServer->pushConfigChanged();
+}
+
+QStringList MainWindow::apiGetGroups() const
+{
+    return m_config.groups;
+}
+
 QJsonArray MainWindow::apiGetBandList() const
 {
     const QList<BandEntry> &list = m_config.bandList.isEmpty()
@@ -2689,7 +2710,7 @@ void MainWindow::transmitMessage(const QString &text, const QString &gridOverrid
                 const int ci = text.indexOf(QStringLiteral(": "));
                 const QString body = (ci >= 0) ? text.mid(ci + 2).trimmed() : QString();
                 if (body.toUpper() != QStringLiteral("ACK")) {
-                    txText = JS8Checksum::appendChecksum(text);
+                    txText = JF8Checksum::appendChecksum(text);
                 }
             }
         }
@@ -2715,7 +2736,7 @@ void MainWindow::transmitMessage(const QString &text, const QString &gridOverrid
     // Show outgoing text in the interactive pane
     if (m_interactiveDisplay) {
         const QString line = QStringLiteral("[%1] >> %2")
-            .arg(QDateTime::currentDateTimeUtc().toString(QStringLiteral("HH:mm:ss")))
+            .arg(QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss")))
             .arg(text);
         m_interactiveDisplay->appendPlainText(line);
     }
@@ -2821,7 +2842,7 @@ void MainWindow::onFrameCleanupTimer()
                 d.submode     = buf.submode;
                 d.frameType   = Varicode::JS8CallLast; // force-complete
                 // Re-parse as assembled message
-                JS8Message msg = parseDecoded(d,
+                JF8Message msg = parseDecoded(d,
                     buf.assembledRawText, m_config.callsign);
                 if (!msg.from.isEmpty()) m_model->addMessage(msg);
                 if (m_wsServer) m_wsServer->pushMessageDecoded(msg);
@@ -2877,7 +2898,7 @@ void MainWindow::saveInfoPane()
 {
     QJsonArray arr;
     for (int i = 0; i < m_model->messageCount(); ++i) {
-        const JS8Message &msg = m_model->messageAt(i);
+        const JF8Message &msg = m_model->messageAt(i);
         QJsonObject o;
         o[QStringLiteral("utc")]          = msg.utc.toString(Qt::ISODate);
         o[QStringLiteral("audioFreqHz")]  = static_cast<double>(msg.audioFreqHz);
@@ -2931,7 +2952,7 @@ void MainWindow::loadInfoPane()
         const QJsonObject o = v.toObject();
         const QDateTime utc = QDateTime::fromString(o[QStringLiteral("utc")].toString(), Qt::ISODate);
         if (!utc.isValid() || utc.secsTo(now) > maxSecs) continue;
-        JS8Message msg;
+        JF8Message msg;
         msg.utc          = utc;
         msg.audioFreqHz  = static_cast<float>(o[QStringLiteral("audioFreqHz")].toDouble());
         msg.snrDb        = o[QStringLiteral("snrDb")].toInt();
@@ -2942,7 +2963,7 @@ void MainWindow::loadInfoPane()
         msg.distKm       = o[QStringLiteral("distKm")].toDouble(-1.0);
         msg.bearingDeg   = o[QStringLiteral("bearingDeg")].toDouble(-1.0);
         msg.gridFromCache= o[QStringLiteral("gridFromCache")].toBool();
-        msg.type         = static_cast<JS8Message::Type>(o[QStringLiteral("type")].toInt());
+        msg.type         = static_cast<JF8Message::Type>(o[QStringLiteral("type")].toInt());
         msg.heardMe      = o[QStringLiteral("heardMe")].toBool();
         if (msg.from.isEmpty() || msg.from.startsWith(QLatin1Char('<'))) continue;
         m_model->addMessage(msg);
@@ -3452,6 +3473,59 @@ void MainWindow::onPreferences()
     displayForm->addRow(tr("Heard pane max age:"), heardAgeSpin);
 
     vbox->addWidget(displayGroup);
+
+    // ── Groups ───────────────────────────────────────────────────────────────
+    auto *groupsGroup = new QGroupBox(tr("Groups"), content);
+    auto *groupsVbox  = new QVBoxLayout(groupsGroup);
+
+    auto *groupsNote = new QLabel(
+        tr("Enter groups you are a member of (e.g. <b>@PRA</b>, <b>@AMRRON</b>). "
+           "Messages addressed to these groups will be treated as directed to you."),
+        groupsGroup);
+    groupsNote->setWordWrap(true);
+    groupsNote->setStyleSheet(QStringLiteral("color: #c9a84c;"));
+    groupsVbox->addWidget(groupsNote);
+
+    auto *groupList = new QListWidget(groupsGroup);
+    groupList->setMaximumHeight(120);
+    for (const QString &g : m_config.groups)
+        groupList->addItem(g);
+    groupsVbox->addWidget(groupList);
+
+    auto *groupInputRow = new QHBoxLayout;
+    auto *groupEdit = new QLineEdit(groupsGroup);
+    groupEdit->setPlaceholderText(QStringLiteral("@GROUPNAME"));
+    auto *addGroupBtn  = new QPushButton(tr("Add"),    groupsGroup);
+    auto *delGroupBtn  = new QPushButton(tr("Remove"), groupsGroup);
+    groupInputRow->addWidget(groupEdit, 1);
+    groupInputRow->addWidget(addGroupBtn);
+    groupInputRow->addWidget(delGroupBtn);
+    groupsVbox->addLayout(groupInputRow);
+
+    connect(addGroupBtn, &QPushButton::clicked, groupsGroup, [groupEdit, groupList]() {
+        QString g = groupEdit->text().trimmed().toUpper();
+        if (g.isEmpty()) return;
+        if (!g.startsWith(QLatin1Char('@'))) g.prepend(QLatin1Char('@'));
+        // Reject entries with invalid characters
+        bool valid = g.length() >= 2;
+        for (int i = 1; valid && i < g.length(); ++i)
+            if (!g[i].isLetterOrNumber()) valid = false;
+        if (!valid) return;
+        // No duplicates
+        for (int i = 0; i < groupList->count(); ++i)
+            if (groupList->item(i)->text() == g) return;
+        groupList->addItem(g);
+        groupEdit->clear();
+    });
+    connect(groupEdit, &QLineEdit::returnPressed, addGroupBtn, &QPushButton::click);
+
+    connect(delGroupBtn, &QPushButton::clicked, groupsGroup, [groupList]() {
+        const auto selected = groupList->selectedItems();
+        for (auto *item : selected)
+            delete item;
+    });
+
+    vbox->addWidget(groupsGroup);
     vbox->addStretch(1);
 
     auto *buttons = new QDialogButtonBox(
@@ -3504,6 +3578,12 @@ void MainWindow::onPreferences()
     m_config.pskReporterEnabled        = pskCheck->isChecked();
     m_config.infoMaxAgeMins            = infoAgeSpin->value();
     m_config.heardMaxAgeMins           = heardAgeSpin->value();
+    {
+        QStringList newGroups;
+        for (int i = 0; i < groupList->count(); ++i)
+            newGroups.append(groupList->item(i)->text());
+        m_config.groups = newGroups;
+    }
     m_config.save();
 
     // Update callsign/grid display label
@@ -3588,7 +3668,7 @@ QJsonArray MainWindow::apiGetMessages(int offset, int limit) const
     QJsonArray arr;
     const int total = m_model->messageCount();
     for (int i = offset; i < qMin(offset + limit, total); ++i) {
-        const JS8Message &msg = m_model->messageAt(i);
+        const JF8Message &msg = m_model->messageAt(i);
         QJsonObject o;
         o[QStringLiteral("time")]     = msg.utc.toString(QStringLiteral("HH:mm:ss"));
         o[QStringLiteral("utc_iso")]  = msg.utc.toString(Qt::ISODate);

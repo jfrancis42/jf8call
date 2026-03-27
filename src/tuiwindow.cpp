@@ -98,7 +98,7 @@ void TuiWindow::start()
 
 // ── Event slots (always defined — update data, mark dirty) ───────────────────
 
-void TuiWindow::onMessageDecoded(const JS8Message &msg)
+void TuiWindow::onMessageDecoded(const JF8Message &msg)
 {
     MsgEntry e;
     e.utc    = msg.utc;
