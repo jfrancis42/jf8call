@@ -265,6 +265,7 @@ void WsServer::pushMessageDecoded(const JF8Message &msg)
     d[QStringLiteral("spot_freq_khz")] = m_app->apiConfig().frequencyKhz
                                          + msg.audioFreqHz / 1000.0;
     d[QStringLiteral("snr_db")]        = msg.snrDb;
+    d[QStringLiteral("dt_s")]          = static_cast<double>(msg.dtSeconds);
     d[QStringLiteral("submode")]       = msg.submodeEnum;
     d[QStringLiteral("submode_name")]  = msg.submodeStr;
     d[QStringLiteral("from")]          = msg.from;

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+#include <QJsonDocument>
 #include "mainwindow.h"
 #include "wsserver.h"
 #include "messagemodel.h"
@@ -121,6 +122,10 @@ public slots:
                     m[QStringLiteral("rawText")] = QString::fromStdString(dt.message());
                 }
                 m[QStringLiteral("snrDb")]     = d.snrDb;
+                // Seconds from the slot boundary. Kept because its
+                // shape over time is what separates a clock offset
+                // from a sample-rate error.
+                m[QStringLiteral("dtSeconds")] = d.dtSeconds;
                 m[QStringLiteral("freqHz")]    = d.frequencyHz;
                 m[QStringLiteral("submode")]   = d.submode;
                 m[QStringLiteral("frameType")] = d.frameType;
@@ -1319,6 +1324,7 @@ void MainWindow::onDecodeFinished(const QList<QVariantMap> &results)
         const QString rawText   = m[QStringLiteral("rawText")].toString();
         const float   freqHz    = m[QStringLiteral("freqHz")].toFloat();
         int           snrDb     = m[QStringLiteral("snrDb")].toInt();
+        float         dtSeconds = m[QStringLiteral("dtSeconds")].toFloat();
         const int     submode   = m[QStringLiteral("submode")].toInt();
 
         ModemDecoded d;
@@ -1427,6 +1433,7 @@ void MainWindow::onDecodeFinished(const QList<QVariantMap> &results)
         // else: isSingleFrame (FrameDirected=3) or streaming modem — process immediately.
 
         JF8Message msg = parseDecoded(d, effectiveRawText, m_config.callsign);
+        msg.dtSeconds = dtSeconds;
         // ── END GFSK8 multi-frame assembly ────────────────────────────────────
 
         // Update / fill grid from persistent cache

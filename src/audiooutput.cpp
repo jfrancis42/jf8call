@@ -45,7 +45,10 @@ bool AudioOutput::open(const QString &deviceName)
     params.device                    = deviceIndex;
     params.channelCount              = 1;  // mono output
     params.sampleFormat              = paInt16;
-    params.suggestedLatency          = Pa_GetDeviceInfo(deviceIndex)->defaultLowOutputLatency;
+    // High, not low -- see audioinput.cpp. An underrun here does not merely
+    // cost a decode, it puts a gap in what is transmitted, and nothing local
+    // ever shows it.
+    params.suggestedLatency          = Pa_GetDeviceInfo(deviceIndex)->defaultHighOutputLatency;
     params.hostApiSpecificStreamInfo = nullptr;
 
     PaError err = Pa_OpenStream(
@@ -53,7 +56,7 @@ bool AudioOutput::open(const QString &deviceName)
         nullptr,         // no input
         &params,
         k_outputRate,
-        256,
+        paFramesPerBufferUnspecified,
         paClipOff,
         &AudioOutput::paCallback,
         this);

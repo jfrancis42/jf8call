@@ -31,6 +31,11 @@ public:
     void stop();
     bool isRunning() const { return m_running.load(); }
 
+    // Capture-stream drop counters. Non-zero means audio has been lost and
+    // decodes will suffer for reasons nothing else will show.
+    static unsigned long long inputOverflowCount();
+    static unsigned long long inputUnderflowCount();
+
     // Copy the most recent nSamples from the ring buffer at the decimated rate.
     // Returns actual count copied (may be less if buffer not yet full).
     int readLatest(std::vector<float> &out, int nSamples);
@@ -51,6 +56,9 @@ signals:
     void audioChunkReady(QByteArray chunk);
 
 private:
+    // Channels actually opened on the capture device: 2 for a stereo codec,
+    // 1 for a mono one such as the C-Media chip used in a Digirig.
+    int m_inputChannels = 2;
     static int paCallback(const void *input, void *output,
                           unsigned long frameCount,
                           const PaStreamCallbackTimeInfo *timeInfo,

@@ -13,6 +13,9 @@ struct JF8Message {
     QDateTime  utc;
     float      audioFreqHz  = 0.0f;
     int        snrDb        = 0;
+    // Seconds this signal sat from the slot boundary (WSJT-X and
+    // JS8Call call the same quantity DT / TDRIFT).
+    float      dtSeconds    = 0.0f;
     QString    submodeStr;             // "Normal", "Fast", etc.
     int        submodeEnum  = 0;
 
