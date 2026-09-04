@@ -48,7 +48,7 @@ public:
                           const QString &assembledText, const QDateTime &utc);
     void pushSpectrum(const std::vector<float> &bins, float sampleRateHz);
     void pushStatus();
-    void pushTxStarted();
+    void pushTxStarted(const QString &text = QString());
     void pushTxFinished();
     void pushRadioConnected(double khz, const QString &mode);
     void pushRadioDisconnected();

@@ -1215,6 +1215,8 @@ void MainWindow::transmitNextFrame()
             pcm48k.push_back(static_cast<int16_t>(
                 std::clamp(last * 32767.0f, -32767.0f, 32767.0f)));
 
+        // Remember what this frame says so tx.started can report it.
+        m_currentTxPayload = payload;
         setTransmitting(true);
         QMetaObject::invokeMethod(m_hamlib, [this]() {
             m_hamlib->setPtt(true);
@@ -2754,12 +2756,13 @@ void MainWindow::setTransmitting(bool tx)
     if (tx) {
         m_rxTxLabel->setText(tr("TX"));
         m_rxTxLabel->setStyleSheet(QStringLiteral("color: #cc2222; font-weight: bold;"));
-        if (m_wsServer) m_wsServer->pushTxStarted();
+        if (m_wsServer) m_wsServer->pushTxStarted(m_currentTxPayload);
         emit txStarted();
     } else {
         m_rxTxLabel->setText(tr("RX"));
         m_rxTxLabel->setStyleSheet(QStringLiteral("color: #7fbf7f; font-weight: bold;"));
         if (m_wsServer) m_wsServer->pushTxFinished();
+        m_currentTxPayload.clear();
         emit txFinished();
     }
 }

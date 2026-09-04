@@ -248,6 +248,7 @@ private:
     QThread     *m_decodeThread = nullptr;
     int          m_txFrameIndex = 0;
     QList<QVariantMap> m_pendingTxFrames;  // {payload, frameType, submode}
+    QString            m_currentTxPayload; // what tx.started reports
     bool         m_transmitting = false;
     bool         m_audioStarted = false;
 

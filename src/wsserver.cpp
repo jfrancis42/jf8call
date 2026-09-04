@@ -345,9 +345,20 @@ void WsServer::pushStatus()
         c->sendTextMessage(text);
 }
 
-void WsServer::pushTxStarted()
+void WsServer::pushTxStarted(const QString &text)
 {
-    broadcast(QStringLiteral("tx.started"));
+    // Carry the payload being sent. Previously this was a bare event, so a
+    // client watching the API could see THAT the radio keyed but never what
+    // it said -- leaving it unable to log its own transmissions without
+    // guessing from the queue. Empty stays omitted, so existing consumers
+    // that ignore the data object are unaffected.
+    if (text.isEmpty()) {
+        broadcast(QStringLiteral("tx.started"));
+        return;
+    }
+    QJsonObject d;
+    d[QStringLiteral("text")] = text;
+    broadcast(QStringLiteral("tx.started"), d);
 }
 
 void WsServer::pushTxFinished()
@@ -597,6 +608,11 @@ QJsonObject WsServer::cmdRadioFreqSet(const QJsonObject &d)
                  d.value(QStringLiteral("khz")).toDouble(0));
     if (khz <= 0)
         throw QStringLiteral("freq_khz must be > 0");
+    // Same guard radio.tune and radio.power.get already use. Without it this
+    // command answers ok:true with no radio attached and the dial never moves,
+    // so a client has no way to tell "done" from "silently ignored".
+    if (!m_app->apiIsRadioConnected())
+        throw QStringLiteral("radio not connected");
     m_app->apiSetFrequency(khz);
     QJsonObject r;
     r[QStringLiteral("freq_khz")] = khz;
