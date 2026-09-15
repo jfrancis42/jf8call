@@ -366,4 +366,22 @@ private:
     };
     QHash<int, GfskFrameBuffer> m_gfsk8FrameBuffers;
     QTimer *m_frameCleanupTimer = nullptr;
+
+    // Compound-directed sender recovery.
+    // A directed message to a compound/custom group (e.g. "@GHOSTNET SNR?")
+    // carries no sender of its own: JS8 sends the sender's callsign in a
+    // SEPARATE compound frame in the same over, so the directed frame decodes
+    // with a "<....>" placeholder for the source. We remember the last real
+    // sender heard on each audio offset and re-attach it to a following
+    // placeholder frame on that offset -- the way JS8Call does with its own
+    // compound-call cache. Keyed by round(freqHz/10) like the buffers above;
+    // a cached sender older than the pairing window is ignored, because a
+    // compound transmission's two frames are one over apart, well under it.
+    struct CompoundSender { QString call; float offsetHz; QDateTime utc; };
+    QHash<int, CompoundSender> m_compoundSenderCache;
+    static constexpr int   kCompoundSenderTtlSec = 90;
+    static constexpr float kCompoundSenderTolHz  = 15.0f;
+    void    noteSenderOffset(float audioFreqHz, const QString &from,
+                             const QString &to, const QDateTime &utc);
+    QString recallSenderOffset(float audioFreqHz, const QDateTime &utc);
 };

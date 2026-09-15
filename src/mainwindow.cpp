@@ -12,6 +12,7 @@
 #include "pskreporter.h"
 
 #include <QApplication>
+#include <QJsonDocument>   // Qt 6.8 no longer pulls this in transitively
 #include <QToolBar>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -1283,6 +1284,64 @@ void MainWindow::onStreamTxTimer()
         transmitNextFrame();
 }
 
+// Remember the sender of a bare compound IDENTITY frame ("W4CAT: ", from set,
+// no destination), so the compound-directed frame that follows it on the same
+// audio offset (which decodes with a "<....>" source) can be attributed to it.
+// Only identity frames are cached: a normal directed message or a heartbeat
+// carries a destination, and caching those would let an unrelated station's
+// traffic on the same offset be pinned to a later placeholder. The placeholder
+// itself and empty sources are never cached.
+void MainWindow::noteSenderOffset(float audioFreqHz, const QString &from,
+                                  const QString &to, const QDateTime &utc)
+{
+    if (from.isEmpty() || from.startsWith(QLatin1Char('<')) || !to.isEmpty())
+        return;
+    const int key = static_cast<int>(std::round(audioFreqHz / 10.0f));
+    m_compoundSenderCache.insert(key, CompoundSender{from, audioFreqHz, utc});
+}
+
+// Recall the sender last heard on this audio offset, if it is recent enough to
+// belong to the same over. The entry is CONSUMED on every read: a compound over
+// is exactly one identity frame plus one directed frame, so a cached sender must
+// pair with at most one placeholder. Leaving it in place would let a later,
+// unrelated placeholder on the same offset be pinned to the wrong operator --
+// the one thing this must never do. Returns empty when nothing fresh to pair.
+QString MainWindow::recallSenderOffset(float audioFreqHz, const QDateTime &utc)
+{
+    // Frames of one transmission wander a couple of Hz between them, so an
+    // identity frame and the directed frame it belongs to can land either side
+    // of a 10 Hz bucket line (seen live: identity 976.0 Hz, its message 973.4 Hz
+    // -- 2.6 Hz apart, but in different buckets). Pair the CLOSEST cached sender
+    // within a small tone tolerance rather than requiring an exact bucket match.
+    // Search +/-2 buckets: the message frequency can sit anywhere in its own
+    // bucket, so a sender up to kCompoundSenderTolHz away can be two buckets off
+    // -- +/-1 would miss it. Closest-match is ambiguous only if two stations'
+    // identity frames fall within the tolerance of each other in the same
+    // window; on a busy channel that is possible, but consuming the entry and
+    // caching only bare identity frames keeps it rare and self-correcting.
+    const int centre = static_cast<int>(std::round(audioFreqHz / 10.0f));
+    int     bestKey  = 0;
+    float   bestDiff = kCompoundSenderTolHz + 1.0f;
+    QString call;
+    for (int k = centre - 2; k <= centre + 2; ++k) {
+        auto it = m_compoundSenderCache.find(k);
+        if (it == m_compoundSenderCache.end())
+            continue;
+        const qint64 age = it->utc.secsTo(utc);
+        if (age < 0 || age > kCompoundSenderTtlSec)
+            continue;
+        const float diff = std::fabs(it->offsetHz - audioFreqHz);
+        if (diff <= kCompoundSenderTolHz && diff < bestDiff) {
+            bestDiff = diff;
+            bestKey  = k;
+            call     = it->call;
+        }
+    }
+    if (!call.isEmpty())
+        m_compoundSenderCache.remove(bestKey);   // consume: pairs one frame only
+    return call;
+}
+
 void MainWindow::onDecodeFinished(const QList<QVariantMap> &results)
 {
     // Deduplicate across submode passes AND across consecutive period boundaries.
@@ -1306,6 +1365,30 @@ void MainWindow::onDecodeFinished(const QList<QVariantMap> &results)
             it = m_recentDecodes.erase(it);
         else
             ++it;
+    }
+
+    // Seed the compound-directed sender cache from every real sender in THIS
+    // batch before the main loop recovers any placeholders, so an identity frame
+    // ("W4CAT: ") pairs with the directed frame it belongs to even when both
+    // decode in one period, whatever order they sit in the results list. Cross-
+    // period pairs are covered by the cache persisting (and being consumed)
+    // across calls. parseDecoded is pure, so parsing here and again below has no
+    // side effects. Placeholder ("<....>") and empty sources are skipped inside
+    // noteSenderOffset, so seeding never poisons the cache with a non-sender.
+    for (const QVariantMap &sm : results) {
+        ModemDecoded sd;
+        sd.message     = sm[QStringLiteral("message")].toString().toStdString();
+        sd.frequencyHz = sm[QStringLiteral("freqHz")].toFloat();
+        sd.snrDb       = sm[QStringLiteral("snrDb")].toInt();
+        sd.submode     = sm[QStringLiteral("submode")].toInt();
+        sd.frameType   = sm[QStringLiteral("frameType")].toInt();
+        sd.modemType   = sm[QStringLiteral("modemType")].toInt();
+        sd.isRawText   = sm[QStringLiteral("isRawText")].toBool();
+        const QString sraw = sm[QStringLiteral("rawText")].toString();
+        const JF8Message seed = parseDecoded(sd,
+            sraw.isEmpty() ? QString::fromStdString(sd.message) : sraw,
+            m_config.callsign);
+        noteSenderOffset(seed.audioFreqHz, seed.from, seed.to, seed.utc);
     }
 
     for (const QVariantMap &m : results) {
@@ -1428,6 +1511,18 @@ void MainWindow::onDecodeFinished(const QList<QVariantMap> &results)
 
         JF8Message msg = parseDecoded(d, effectiveRawText, m_config.callsign);
         // ── END GFSK8 multi-frame assembly ────────────────────────────────────
+
+        // Compound-directed sender recovery: a "@GROUP CMD" frame decodes with
+        // a "<....>" placeholder for its source, because the sender rode in a
+        // separate compound frame this same over (cached in the seed pass
+        // above). Re-attach it here, before everything below, so the grid cache,
+        // heard pane, PSK spot and websocket all see the recovered callsign. The
+        // recall consumes the entry, so it can pair with only this one frame.
+        if (msg.from.isEmpty() || msg.from.startsWith(QLatin1Char('<'))) {
+            const QString recovered = recallSenderOffset(msg.audioFreqHz, msg.utc);
+            if (!recovered.isEmpty())
+                msg.from = recovered;
+        }
 
         // Update / fill grid from persistent cache
         if (!msg.from.isEmpty()) {
@@ -2846,6 +2941,13 @@ void MainWindow::onFrameCleanupTimer()
                 // Re-parse as assembled message
                 JF8Message msg = parseDecoded(d,
                     buf.assembledRawText, m_config.callsign);
+                // Same compound-directed recovery as the live path above.
+                if (msg.from.isEmpty() || msg.from.startsWith(QLatin1Char('<'))) {
+                    const QString recovered =
+                        recallSenderOffset(msg.audioFreqHz, msg.utc);
+                    if (!recovered.isEmpty())
+                        msg.from = recovered;
+                }
                 if (!msg.from.isEmpty()) m_model->addMessage(msg);
                 if (m_wsServer) m_wsServer->pushMessageDecoded(msg);
                 emit messageDecoded(msg);
